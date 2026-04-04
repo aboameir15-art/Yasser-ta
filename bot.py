@@ -159,108 +159,129 @@ def calculate_liquidation(entry_price, leverage, side):
     else: 
         return entry * (1 + (1.0 / lev)) [cite: 89]
 
+# ==========================================
+# 1. الدوال الحسابية (Math Core)
+# ==========================================
+
+def calculate_liquidation(entry_price, leverage, side):
+    """حساب سعر التصفية: السعر الذي تفقد عنده كامل الهامش"""
+    entry = float(entry_price)
+    lev = int(leverage)
+    # المعادلة: سعر الدخول * (1 -/+ 1/الرافعة)
+    if side == 'LONG':
+        return entry * (1 - (1.0 / lev))
+    else: 
+        return entry * (1 + (1.0 / lev))
+
 def generate_candle_chart(direction):
-    """محاكاة بصرية للشموع اليابانية""" [cite: 90]
+    """رسم توضيحي بسيط لاتجاه السعر (شمعة يابانية)"""
     if direction == 'UP':
-        return "📉 ⇠ |---🟩---|\n⇠ 🚀 صعود إيجابي" [cite: 90, 91]
+        return "📉 ⇠ |---🟩---|\n⇠ 🚀 صعود إيجابي"
     else:
-        return "📈 ⇠ |---🟥---|\n⇠ 🩸 هبوط سلبي" [cite: 91, 92]
+        return "📈 ⇠ |---🟥---|\n⇠ 🩸 هبوط سلبي"
+
+# ==========================================
+# 2. إدارة البيانات المالية (Database Helpers)
+# ==========================================
 
 async def get_user_data(user_id):
-    """جلب بروفايل المستخدم المالي بالكامل""" [cite: 107]
-    res = supabase.table("users_global_profile").select("*").eq("user_id", user_id).execute() [cite: 107]
-    return res.data[0] if res.data else None [cite: 107]
-
-async def get_user_bank_balance(user_id):
-    """جلب رصيد البنك الخاص بالتداول""" [cite: 92]
-    data = await get_user_data(user_id)
-    return float(data.get('bank_balance', 0)) if data else 0.0
+    """جلب بيانات المستخدم من جدول السوبابيس الرئيسي"""
+    res = supabase.table("users_global_profile").select("*").eq("user_id", user_id).execute()
+    return res.data[0] if res.data else None
 
 async def check_financial_health(user_id, amount, action="WITHDRAW"):
-    """نظام الحماية الصارم (The Guard)""" [cite: 107]
+    """نظام الحماية: يمنع السحب إذا وجد دين أو صفقات مفتوحة محجوزة"""
     data = await get_user_data(user_id)
     if not data: return False, "❌ حسابك غير مسجل."
     
-    bank_bal = float(data.get('bank_balance', 0)) [cite: 108]
-    debt = float(data.get('debt_balance', 0)) [cite: 108]
+    bank_bal = float(data.get('bank_balance', 0))
+    debt = float(data.get('debt_balance', 0))
     
-    # حساب الهامش المحجوز
-    trades = supabase.table("active_trades").select("margin").eq("user_id", user_id).eq("is_active", True).execute().data [cite: 108]
-    locked_margin = sum(float(t['margin']) for t in trades) if trades else 0 [cite: 108]
-    available_cash = bank_bal - locked_margin [cite: 108]
+    # حساب الهامش المحجوز (Locked Margin) في الصفقات النشطة
+    trades_res = supabase.table("active_trades").select("margin").eq("user_id", user_id).eq("is_active", True).execute()
+    locked_margin = sum(float(t['margin']) for t in trades_res.data) if trades_res.data else 0
+    available_cash = bank_bal - locked_margin
 
     if action == "WITHDRAW":
         if debt > 0:
-            return False, f"⚠️ لا يمكنك السحب! لديك دين مستحق بقيمة {debt:,.2f} $.\nسدد ديونك أولاً." [cite: 108, 109, 110]
+            return False, f"⚠️ لا يمكنك السحب! لديك دين مستحق بقيمة {debt:,.2f} $.\nسدد ديونك أولاً."
         if amount > available_cash:
-            return False, f"⚠️ المبلغ محجوز في صفقات نشطة.\nالمتاح فعلياً: {available_cash:,.2f} $." [cite: 110, 111]
+            return False, f"⚠️ المبلغ محجوز في صفقات نشطة.\nالمتاح فعلياً: {available_cash:,.2f} $."
     
     elif action == "BORROW":
         if debt > 0:
-            return False, "⚠️ لديك قرض نشط.\nلا يمكنك الاقتراض مجدداً قبل السداد." [cite: 111, 112]
+            return False, "⚠️ لديك قرض نشط.\nلا يمكنك الاقتراض مجدداً قبل السداد."
         if bank_bal < 10:
-            return False, "⚠️ رصيدك ضعيف جداً للحصول على ائتمان.\nأودع أولاً." [cite: 112, 113]
+            return False, "⚠️ رصيدك ضعيف جداً للحصول على ائتمان (أقل من 10$)."
             
-    return True, "Success" [cite: 113]
+    return True, "Success"
+
+# ==========================================
+# 3. إدارة الصفقات النشطة (Trade Management)
+# ==========================================
 
 async def get_active_trades_report(user_id):
-    """تجلب الصفقات وتحسب الأرباح اللحظية لكل صفقة""" [cite: 116]
-    res = supabase.table("active_trades").select("*").eq("user_id", user_id).eq("is_active", True).execute() [cite: 116]
+    """حساب الأرباح والخسائر (PnL) الحالية لكل صفقة مفتوحة"""
+    res = supabase.table("active_trades").select("*").eq("user_id", user_id).eq("is_active", True).execute()
     trades = res.data
     if not trades:
-        return None, "📋 <b>لا توجد صفقات مفتوحة حالياً.</b>" [cite: 116]
+        return None, "📋 <b>لا توجد صفقات مفتوحة حالياً.</b>"
 
-    report_text = "📋 | <b>قـائمة صـفـقاتك الـمفتوحة</b>\n━━━━━━━━━━━━━━━━━━\n" [cite: 116, 117]
+    report_text = "📋 | <b>قـائمة صـفـقاتك الـمفتوحة</b>\n━━━━━━━━━━━━━━━━━━\n"
     for trade in trades:
-        symbol = trade['symbol'] [cite: 117]
-        side = "🟢 LONG" if trade['side'] == 'LONG' else "🔴 SHORT" [cite: 117]
-        entry = float(trade['entry_price']) [cite: 117]
-        lev = trade['leverage'] [cite: 117]
-        margin = float(trade['margin']) [cite: 117]
+        symbol = trade['symbol']
+        side = "🟢 LONG" if trade['side'] == 'LONG' else "🔴 SHORT"
+        entry = float(trade['entry_price'])
+        lev = trade['leverage']
+        margin = float(trade['margin'])
         
-        coin_res = supabase.table("crypto_market_simulation").select("current_price").eq("symbol", symbol).execute() [cite: 118]
-        current_price = float(coin_res.data[0]['current_price']) if coin_res.data else entry [cite: 118]
+        # جلب سعر العملة الحالي من جدول محاكاة السوق
+        coin_res = supabase.table("crypto_market_simulation").select("current_price").eq("symbol", symbol).execute()
+        current_price = float(coin_res.data[0]['current_price']) if coin_res.data else entry
 
-        pnl_pct = (current_price - entry) / entry if trade['side'] == 'LONG' else (entry - current_price) / entry [cite: 118]
-        pnl_amount = margin * pnl_pct * lev [cite: 118]
-        pnl_emoji = "💰" if pnl_amount >= 0 else "📉" [cite: 118]
+        # حساب النسبة المئوية للربح/الخسارة بناءً على الرافعة المالية
+        pnl_pct = (current_price - entry) / entry if trade['side'] == 'LONG' else (entry - current_price) / entry
+        pnl_amount = margin * pnl_pct * lev
+        pnl_emoji = "💰" if pnl_amount >= 0 else "📉"
 
-        report_text += f"<b>#{symbol} | {side} {lev}x</b>\n" [cite: 118, 119]
-        report_text += f"• الـدخول: <code>{entry:,.4f}</code> | الآن: <code>{current_price:,.4f}</code>\n" [cite: 119, 120]
-        report_text += f"{pnl_emoji} الـربح/الخسارة: <b>{pnl_amount:+.2f} $</b>\n" [cite: 120]
-        report_text += "━━━━━━━━━━━━━━━━━━\n" [cite: 120]
+        report_text += f"<b>#{symbol} | {side} {lev}x</b>\n"
+        report_text += f"• الـدخول: <code>{entry:,.4f}</code> | الآن: <code>{current_price:,.4f}</code>\n"
+        report_text += f"{pnl_emoji} الـربح/الخسارة: <b>{pnl_amount:+.2f} $</b>\n"
+        report_text += "━━━━━━━━━━━━━━━━━━\n"
         
-    return trades, report_text [cite: 120]
+    return trades, report_text
 
 async def close_trade_manually(trade_id, current_price):
-    """إغلاق الصفقة يدوياً وحساب الأرباح وإعادة الهامش للبنك""" [cite: 120]
-    res = supabase.table("active_trades").select("*").eq("id", trade_id).execute() [cite: 120]
-    if not res.data: return False, "الصفقة غير موجودة." [cite: 120]
+    """إغلاق الصفقة وتصفية الحساب وإرجاع الرصيد للبنك"""
+    res = supabase.table("active_trades").select("*").eq("id", trade_id).execute()
+    if not res.data: return False, "الصفقة غير موجودة."
     
     trade = res.data[0]
-    user_id = trade['user_id'] [cite: 120]
-    entry = float(trade['entry_price']) [cite: 121]
-    margin = float(trade['margin']) [cite: 121]
-    lev = int(trade['leverage']) [cite: 121]
-    side = trade['side'] [cite: 121]
+    user_id = trade['user_id']
+    entry = float(trade['entry_price'])
+    margin = float(trade['margin'])
+    lev = int(trade['leverage'])
+    side = trade['side']
     
-    pnl_pct = (current_price - entry) / entry if side == 'LONG' else (entry - current_price) / entry [cite: 121]
-    pnl_amount = margin * pnl_pct * lev [cite: 121]
-    total_return = margin + pnl_amount [cite: 121, 122]
+    # حساب النتيجة النهائية
+    pnl_pct = (current_price - entry) / entry if side == 'LONG' else (entry - current_price) / entry
+    pnl_amount = margin * pnl_pct * lev
+    total_return = margin + pnl_amount # الهامش الأصلي + الربح (أو - الخسارة)
     
-    user_data = await get_user_data(user_id) [cite: 122]
-    new_bank = float(user_data['bank_balance']) + total_return [cite: 122]
-    supabase.table("users_global_profile").update({"bank_balance": new_bank}).eq("user_id", user_id).execute() [cite: 122]
+    # تحديث رصيد البنك
+    user_data = await get_user_data(user_id)
+    new_bank = float(user_data['bank_balance']) + total_return
+    supabase.table("users_global_profile").update({"bank_balance": new_bank}).eq("user_id", user_id).execute()
     
+    # أرشفة الصفقة (جعلها غير نشطة)
     supabase.table("active_trades").update({
         "is_active": False, 
         "close_price": current_price, 
         "pnl": pnl_amount,
         "closed_at": datetime.now().isoformat()
-    }).eq("id", trade_id).execute() [cite: 122, 123]
+    }).eq("id", trade_id).execute()
     
-    return True, pnl_amount [cite: 123]
-
+    return True, pnl_amount
 # ==========================================
 # 3. قوالب واجهات المستخدم (Secured Keyboards)
 # ==========================================
