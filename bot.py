@@ -264,19 +264,23 @@ async def close_trade_manually(trade_id, current_price):
 # ==========================================
 # 3. قوالب واجهات المستخدم (Secured Keyboards)
 # ==========================================
-# تم زرع المعرف user_id في كل الأزرار لضمان الحماية في معالجات النقر
 
 def get_market_keyboard(user_id):
     markup = InlineKeyboardMarkup(row_width=3)
+    
+    # تصحيح: إضافة الفواصل بين الأزرار وحذف المراجع النصية التي تسبب الخطأ
     markup.row(
-        InlineKeyboardButton("🔥 الأكثر رواجاً", callback_data=f"market_tab:{user_id}:trending"), [cite: 104]
-        InlineKeyboardButton("📈 الأكثر ربحاً", callback_data=f"market_tab:{user_id}:gainers"), [cite: 104]
-        InlineKeyboardButton("📉 الأكثر خسارة", callback_data=f"market_tab:{user_id}:losers") [cite: 104]
+        InlineKeyboardButton("🔥 الرائجة", callback_data=f"market_tab:{user_id}:trending"),
+        InlineKeyboardButton("📈 الرابحة", callback_data=f"market_tab:{user_id}:gainers"),
+        InlineKeyboardButton("📉 الخاسرة", callback_data=f"market_tab:{user_id}:losers")
     )
-    markup.add(InlineKeyboardButton("🏦 محفظتي", callback_data=f"wallet_view:{user_id}")) [cite: 104]
-    markup.add(InlineKeyboardButton("📋 صفقاتي المفتوحة", callback_data=f"active_trades_view:{user_id}")) [cite: 104, 105]
-    return markup [cite: 105]
-
+    
+    # إضافة الأزرار الرئيسية في صفوف منفصلة
+    markup.add(InlineKeyboardButton("🏦 محفظتي الماليـة", callback_data=f"wallet_view:{user_id}"))
+    markup.add(InlineKeyboardButton("📋 صفقاتي المفتوحة", callback_data=f"active_trades_view:{user_id}"))
+    
+    return markup
+    
 def get_coin_keyboard(user_id, symbol):
     markup = InlineKeyboardMarkup(row_width=2)
     markup.row(
