@@ -281,62 +281,72 @@ def get_market_keyboard(user_id):
     
     return markup
     
+# ==========================================
+# 3. قوالب واجهات المستخدم المصححة
+# ==========================================
+
 def get_coin_keyboard(user_id, symbol):
     markup = InlineKeyboardMarkup(row_width=2)
+    # تصحيح: إضافة الفاصلة بين الزرين
     markup.row(
-        InlineKeyboardButton("🟢 شـراء (LONG)", callback_data=f"setup_trade:{user_id}:{symbol}:LONG"), [cite: 105]
-        InlineKeyboardButton("🔴 بـيـع (SHORT)", callback_data=f"setup_trade:{user_id}:{symbol}:SHORT") [cite: 105]
+        InlineKeyboardButton("🟢 شـراء (LONG)", callback_data=f"setup_trade:{user_id}:{symbol}:LONG"),
+        InlineKeyboardButton("🔴 بـيـع (SHORT)", callback_data=f"setup_trade:{user_id}:{symbol}:SHORT")
     )
-    markup.add(InlineKeyboardButton("🔙 العودة للسوق", callback_data=f"market_tab:{user_id}:trending")) [cite: 105]
-    return markup [cite: 105]
+    markup.add(InlineKeyboardButton("🔙 العودة للسوق", callback_data=f"market_tab:{user_id}:trending"))
+    return markup
 
 def get_trade_setup_keyboard(user_id):
-    session = trade_sessions.get(user_id) [cite: 105]
-    if not session: return None [cite: 105]
+    session = trade_sessions.get(user_id)
+    if not session: return None
     
-    sym = session['symbol'] [cite: 106]
-    side = session['side'] [cite: 106]
+    sym = session['symbol']
+    side = session['side']
     
     markup = InlineKeyboardMarkup(row_width=2)
+    # تصحيح: إضافة الفاصلة بين الزرين
     markup.row(
-        InlineKeyboardButton(f"⚖️ الرافعة: {session['leverage']}x", callback_data=f"trade_cycle:{user_id}:leverage"), [cite: 106]
-        InlineKeyboardButton(f"💼 النسبة: {session['margin_pct']}%", callback_data=f"trade_cycle:{user_id}:margin") [cite: 106]
+        InlineKeyboardButton(f"⚖️ الرافعة: {session['leverage']}x", callback_data=f"trade_cycle:{user_id}:leverage"),
+        InlineKeyboardButton(f"💼 النسبة: {session['margin_pct']}%", callback_data=f"trade_cycle:{user_id}:margin")
     )
-    markup.add(InlineKeyboardButton(f"⏳ المدة: {DURATION_MAP[session['duration']][0]}", callback_data=f"trade_cycle:{user_id}:duration")) [cite: 106]
+    markup.add(InlineKeyboardButton(f"⏳ المدة: {DURATION_MAP[session['duration']][0]}", callback_data=f"trade_cycle:{user_id}:duration"))
     
-    confirm_text = "🚀 تأكيد الشراء (LONG)" if side == 'LONG' else "🩸 تأكيد البيع (SHORT)" [cite: 106]
-    markup.add(InlineKeyboardButton(confirm_text, callback_data=f"trade_confirm:{user_id}:{sym}")) [cite: 107]
-    markup.add(InlineKeyboardButton("❌ إلغاء", callback_data=f"coin_view:{user_id}:{sym}")) [cite: 107]
-    return markup [cite: 107]
+    confirm_text = "🚀 تأكيد الشراء (LONG)" if side == 'LONG' else "🩸 تأكيد البيع (SHORT)"
+    markup.add(InlineKeyboardButton(confirm_text, callback_data=f"trade_confirm:{user_id}:{sym}"))
+    markup.add(InlineKeyboardButton("❌ إلغاء", callback_data=f"coin_view:{user_id}:{sym}"))
+    return markup
 
 def get_wallet_keyboard(user_id, debt):
     markup = InlineKeyboardMarkup(row_width=2)
+    # تصحيح: إضافة الفاصلة بين الزرين
     markup.row(
-        InlineKeyboardButton("📥 إيداع للتداول", callback_data=f"transfer_flow:{user_id}:to_bank"), [cite: 113]
-        InlineKeyboardButton("📤 سحب للمحفظة", callback_data=f"transfer_flow:{user_id}:to_wallet") [cite: 113]
+        InlineKeyboardButton("📥 إيداع للتداول", callback_data=f"transfer_flow:{user_id}:to_bank"),
+        InlineKeyboardButton("📤 سحب للمحفظة", callback_data=f"transfer_flow:{user_id}:to_wallet")
     )
-    if debt > 0: [cite: 114]
-        markup.add(InlineKeyboardButton("🔴 تسديد القرض", callback_data=f"repay_loan:{user_id}")) [cite: 114]
+    
+    if debt > 0:
+        markup.add(InlineKeyboardButton("🔴 تسديد القرض", callback_data=f"repay_loan:{user_id}"))
     else:
-        markup.add(InlineKeyboardButton("💰 طلب قرض سريع", callback_data=f"loan_menu:{user_id}")) [cite: 114]
+        markup.add(InlineKeyboardButton("💰 طلب قرض سريع", callback_data=f"loan_menu:{user_id}"))
         
-    markup.add(
-        InlineKeyboardButton("📋 صفقاتي", callback_data=f"active_trades_view:{user_id}"),  [cite: 114]
-        InlineKeyboardButton("🛒 السوق", callback_data=f"market_tab:{user_id}:trending") [cite: 114]
+    # تصحيح: إضافة الفاصلة بين الزرين في markup.add
+    markup.row(
+        InlineKeyboardButton("📋 صفقاتي", callback_data=f"active_trades_view:{user_id}"),
+        InlineKeyboardButton("🛒 السوق", callback_data=f"market_tab:{user_id}:trending")
     )
-    return markup [cite: 114]
+    return markup
 
 def get_trades_keyboard(user_id, trades):
-    markup = InlineKeyboardMarkup(row_width=2)
-    for trade in trades: [cite: 114]
-        symbol = trade['symbol'] [cite: 115]
-        trade_id = trade['id'] [cite: 115]
-        markup.add(
-            InlineKeyboardButton(f"🚀 تعزيز (DCA) {symbol}", callback_data=f"dca_trade:{user_id}:{trade_id}"), [cite: 115]
-            InlineKeyboardButton(f"❌ إغلاق الآن", callback_data=f"close_trade:{user_id}:{trade_id}") [cite: 115]
+    markup = InlineKeyboardMarkup(row_width=1) # يفضل عرض الصفقات عمودياً لسهولة التحكم
+    for trade in trades:
+        symbol = trade['symbol']
+        trade_id = trade['id']
+        # إضافة أزرار كل صفقة في صف واحد (Row)
+        markup.row(
+            InlineKeyboardButton(f"🚀 تعزيز {symbol}", callback_data=f"dca_trade:{user_id}:{trade_id}"),
+            InlineKeyboardButton(f"❌ إغلاق", callback_data=f"close_trade:{user_id}:{trade_id}")
         )
-    markup.add(InlineKeyboardButton("🔙 العودة للسوق", callback_data=f"market_tab:{user_id}:trending")) [cite: 115]
-    return markup [cite: 115]
+    markup.add(InlineKeyboardButton("🔙 العودة للسوق", callback_data=f"market_tab:{user_id}:trending"))
+    return markup
 
 # ==========================================
 # 4. المستمعات السمعية الأساسية (Text Listeners)
