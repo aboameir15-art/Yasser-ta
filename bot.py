@@ -974,3 +974,12 @@ async def main_startup():
         logging.error(f"❌ خطأ في تشغيل البوت: {e}")
     finally:
         await bot.session.close()
+
+if __name__ == '__main__':
+    # دمج جميع العمليات في مسار واحد (Event Loop) يمنع التضارب
+    loop = asyncio.get_event_loop()
+    try:
+        loop.run_until_complete(main_startup())
+    except KeyboardInterrupt:
+        logging.info("🛑 تم إيقاف البوت يدوياً.")
+        
