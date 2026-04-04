@@ -349,79 +349,82 @@ def get_trades_keyboard(user_id, trades):
     return markup
 
 # ==========================================
-# 4. المستمعات السمعية الأساسية (Text Listeners)
+# 4. المستمعات النصية الأساسية (Text Listeners)
 # ==========================================
 
 # تم استخدام Text(equals=[...]) للاستجابة المباشرة للنص بدون أي شرطة أو علامة
 @dp.message_handler(Text(equals=["محفظتي", "المحفظة"], ignore_case=True))
 async def listener_wallet(message: types.Message):
-    user_id = message.from_user.id [cite: 132]
+    user_id = message.from_user.id
     
-    data = await get_user_data(user_id) [cite: 132]
+    # جلب بيانات المستخدم من قاعدة البيانات
+    data = await get_user_data(user_id)
     if not data: 
-        return await message.answer("❌ <b>عذراً!</b> سجل حسابك أولاً بالضغط على /start", parse_mode="HTML") [cite: 132]
+        return await message.answer("❌ <b>عذراً!</b> سجل حسابك أولاً بالضغط على /start", parse_mode="HTML")
 
-    bank_bal = float(data.get('bank_balance', 0)) [cite: 132]
-    wallet_bal = float(data.get('wallet', 0)) [cite: 133]
-    debt = float(data.get('debt_balance', 0)) [cite: 133]
+    bank_bal = float(data.get('bank_balance', 0))
+    wallet_bal = float(data.get('wallet', 0))
+    debt = float(data.get('debt_balance', 0))
     
-    trades_res = supabase.table("active_trades").select("id").eq("user_id", user_id).eq("is_active", True).execute() [cite: 133]
-    active_count = len(trades_res.data) if trades_res.data else 0 [cite: 133]
+    # فحص الصفقات النشطة
+    trades_res = supabase.table("active_trades").select("id").eq("user_id", user_id).eq("is_active", True).execute()
+    active_count = len(trades_res.data) if trades_res.data else 0
     
-    text = "🏦 | <b>مـركـز إدارة الأمـوال والأصول</b>\n" [cite: 133, 134]
-    text += "━━━━━━━━━━━━━━━━━━\n" [cite: 134]
-    text += f"👤 الـمـسـتـخدم: <b>{message.from_user.first_name}</b>\n\n" [cite: 134]
-    text += f"💳 <b>رصـيد الـمحفظة:</b> <code>{wallet_bal:,.2f} $</code>\n" [cite: 134]
-    text += f"📈 <b>حـساب الـتداول:</b> <code>{bank_bal:,.2f} $</code>\n" [cite: 134]
-    text += "━━━━━━━━━━━━━━━━━━\n" [cite: 134]
-    text += f"📊 صـفقات مـفـتوحة حالياً: <b>{active_count}</b>\n" [cite: 134]
+    text = "🏦 | <b>مـركـز إدارة الأمـوال والأصول</b>\n"
+    text += "━━━━━━━━━━━━━━━━━━\n"
+    text += f"👤 الـمـسـتـخدم: <b>{message.from_user.first_name}</b>\n\n"
+    text += f"💳 <b>رصـيد الـمحفظة:</b> <code>{wallet_bal:,.2f} $</code>\n"
+    text += f"📈 <b>حـساب الـتداول:</b> <code>{bank_bal:,.2f} $</code>\n"
+    text += "━━━━━━━━━━━━━━━━━━\n"
+    text += f"📊 صـفقات مـفـتوحة حالياً: <b>{active_count}</b>\n"
     
-    if debt > 0: [cite: 134]
-        text += f"⚠️ <b>الـديون الـمستحقة:</b> <pre>{debt:,.2f} $</pre>\n" [cite: 134]
+    # فحص الديون لعرض التنبيه
+    if debt > 0:
+        text += f"⚠️ <b>الـديون الـمستحقة:</b> <code>{debt:,.2f} $</code>\n"
     else:
-        text += "✅ <b>حالة الائتمان:</b> سليم\n" [cite: 134]
+        text += "✅ <b>حالة الائتمان:</b> سليم\n"
     
-    text += "━━━━━━━━━━━━━━━━━━\n" [cite: 135]
+    text += "━━━━━━━━━━━━━━━━━━\n"
     
-    await message.answer(text, reply_markup=get_wallet_keyboard(user_id, debt), parse_mode="HTML") [cite: 135]
+    await message.answer(text, reply_markup=get_wallet_keyboard(user_id, debt), parse_mode="HTML")
 
 @dp.message_handler(Text(equals=["تداول", "السوق", "التداول"], ignore_case=True))
 async def listener_market(message: types.Message):
-    user_id = message.from_user.id [cite: 129]
+    user_id = message.from_user.id
     
-    res = supabase.table("crypto_market_simulation").select("*").order("volume_24h", desc=True).limit(5).execute() [cite: 130]
-    coins = res.data [cite: 130]
+    # جلب العملات من السوق (Binance Mode)
+    res = supabase.table("crypto_market_simulation").select("*").order("volume_24h", desc=True).limit(5).execute()
+    coins = res.data
     
-    text = "📊 | <b>سـوق الـعـمـلات (Binance Mode)</b>\n" [cite: 130]
-    text += "━━━━━━━━━━━━━━━━━━\n" [cite: 130]
-    text += "🔥 <b>الأكثر رواجاً حالياً:</b>\n\n" [cite: 130]
+    text = "📊 | <b>سـوق الـعـمـلات (Binance Mode)</b>\n"
+    text += "━━━━━━━━━━━━━━━━━━\n"
+    text += "🔥 <b>الأكثر رواجاً حالياً:</b>\n\n"
     
-    markup = get_market_keyboard(user_id) [cite: 130]
+    markup = get_market_keyboard(user_id)
     
-    if not coins: [cite: 130]
-        text += "⚠️ لا توجد بيانات في السوق حالياً." [cite: 130]
-    else: [cite: 131]
-        for c in coins: [cite: 131]
-            sym = c['symbol'] [cite: 131]
-            price = float(c['current_price']) [cite: 131]
-            chg = float(c['change_24h']) [cite: 131]
-            icon = "🟢" if chg >= 0 else "🔴" [cite: 131]
-            text += f"{icon} <b>{sym}</b> : <code>{price:,.4f} $</code> ({chg:+.2f}%)\n" [cite: 131]
-            markup.add(InlineKeyboardButton(f"عرض {sym} 🪙", callback_data=f"coin_view:{user_id}:{sym}")) [cite: 132]
+    if not coins:
+        text += "⚠️ لا توجد بيانات في السوق حالياً."
+    else:
+        for c in coins:
+            sym = c['symbol']
+            price = float(c['current_price'])
+            chg = float(c['change_24h'])
+            icon = "🟢" if chg >= 0 else "🔴"
+            text += f"{icon} <b>{sym}</b> : <code>{price:,.4f} $</code> ({chg:+.2f}%)\n"
+            # إضافة أزرار العملات تحت الرسالة
+            markup.add(InlineKeyboardButton(f"عرض {sym} 🪙", callback_data=f"coin_view:{user_id}:{sym}"))
 
-    await message.answer(text, reply_markup=markup, parse_mode="HTML") [cite: 132]
+    await message.answer(text, reply_markup=markup, parse_mode="HTML")
 
 @dp.message_handler(Text(equals=["صفقاتي", "الصفقات"], ignore_case=True))
 async def listener_trades(message: types.Message):
-    user_id = message.from_user.id [cite: 129]
-    trades, text = await get_active_trades_report(user_id) [cite: 129]
+    user_id = message.from_user.id
+    trades, text = await get_active_trades_report(user_id)
     
-    if not trades: [cite: 129]
-        return await message.answer(text, reply_markup=get_market_keyboard(user_id), parse_mode="HTML") [cite: 129]
+    if not trades:
+        return await message.answer(text, reply_markup=get_market_keyboard(user_id), parse_mode="HTML")
     
-    await message.answer(text, reply_markup=get_trades_keyboard(user_id, trades), parse_mode="HTML") [cite: 129]
-    
-    
+    await message.answer(text, reply_markup=get_trades_keyboard(user_id, trades), parse_mode="HTML")
 # ==========================================
 # 5. دوال مساعدة للواجهات (UI Helpers)
 # ==========================================
