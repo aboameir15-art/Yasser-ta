@@ -945,7 +945,7 @@ async def self_resuscitation():
         await asyncio.sleep(240)
         
 async def main_startup():
-    # أ) إعداد سيرفر الويب
+    # أ) إعداد سيرفر الويب (لبقاء البوت متصلاً على Render)
     app = web.Application()
     app.router.add_get('/', handle_ping)
     app.router.add_get('/login', handle_telegram_login)
@@ -962,18 +962,24 @@ async def main_startup():
     asyncio.create_task(market_engine())
     asyncio.create_task(trade_reaper())
 
-    # ج) تشغيل البوت (التصحيح هنا)
+    # ج) تشغيل البوت (لإصدار Aiogram 2.x)
     try:
         logging.info("🚀 جاري إقلاع محرك التليجرام...")
         
-        # في الإصدارات الحديثة، نستخدم drop_pending_updates=True بدلاً من skip_updates
-        # ونقوم بحذف reset_webhook إذا كنت تستخدم Polling عادي
-        await dp.start_polling(bot, drop_pending_updates=True)
+        # 1. تخطي الرسائل القديمة المتراكمة أثناء الإيقاف
+        await dp.skip_updates()
+        
+        # 2. بدء استقبال الرسائل والطلبات
+        await dp.start_polling()
         
     except Exception as e:
         logging.error(f"❌ خطأ في تشغيل البوت: {e}")
     finally:
-        await bot.session.close()
+        # الإغلاق الآمن لتجنب تحذيرات (NoneType)
+        logging.info("🛑 جاري إغلاق الاتصال بأمان...")
+        await bot.close()
+        await dp.storage.close()
+        await dp.storage.wait_closed()
 
 if __name__ == '__main__':
     # دمج جميع العمليات في مسار واحد (Event Loop) يمنع التضارب
