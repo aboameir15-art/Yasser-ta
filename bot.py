@@ -57,6 +57,8 @@ bot = Bot(token=API_TOKEN, parse_mode="HTML")
 storage = MemoryStorage()
 dp = Dispatcher(bot, storage=storage)
 supabase: Client = create_client(SUPABASE_URL, SUPABASE_KEY)
+# 1. في بداية الملف (خارج كل الدوال) قم بتعريف هذا المتغير
+bot_username = None 
 
 # ==========================================
 # 1. إعدادات الجلسات والقيم الثابتة (Config & State)
@@ -942,10 +944,8 @@ async def self_resuscitation():
         # اجعلها كل 4 دقائق (240 ثانية) - كن "مزعجاً" لسيرفر ريندر لكي لا ينام
         await asyncio.sleep(240)
         
-# 3. دالة التشغيل الشاملة (المايسترو)
-# 3. دالة التشغيل الشاملة (المايسترو)
 async def main_startup():
-    # أ) إعداد سيرفر الويب (للبقاء حياً على Render)
+    # أ) إعداد سيرفر الويب
     app = web.Application()
     app.router.add_get('/', handle_ping)
     app.router.add_get('/login', handle_telegram_login)
@@ -957,28 +957,20 @@ async def main_startup():
     await site.start()
     logging.info(f"🌐 Server started on port {port}")
 
-    # ب) تشغيل المحركات الخلفية لنظام التداول (الركائز الأساسية)
-    # نستخدم create_task لكي تعمل في الخلفية ولا تعطل البوت
+    # ب) تشغيل محركات التداول في الخلفية
     logging.info("⏳ جاري تشغيل محركات السوق والرادار...")
-    asyncio.create_task(market_engine())  # محرك تحديث الأسعار
-    asyncio.create_task(trade_reaper())   # رادار التصفية والوقت
-    
-    # ج) تشغيل البوت (هنا التغيير لضمان عدم التعطل)
+    asyncio.create_task(market_engine())
+    asyncio.create_task(trade_reaper())
+
+    # ج) تشغيل البوت (التصحيح هنا)
     try:
-        logging.info("🚀 جاري إقلاع محرك التليجرام (Aiogram)...")
-        # ملاحظة: استدعينا start_polling في النهاية لأنها دالة توقف المسار
-        await dp.start_polling(reset_webhook=True, skip_updates=True)
+        logging.info("🚀 جاري إقلاع محرك التليجرام...")
+        
+        # في الإصدارات الحديثة، نستخدم drop_pending_updates=True بدلاً من skip_updates
+        # ونقوم بحذف reset_webhook إذا كنت تستخدم Polling عادي
+        await dp.start_polling(bot, drop_pending_updates=True)
+        
     except Exception as e:
         logging.error(f"❌ خطأ في تشغيل البوت: {e}")
     finally:
-        await bot.close()
-        await runner.cleanup() # تنظيف السيرفر عند الإغلاق
-        
-if __name__ == '__main__':
-    # دمج جميع العمليات في مسار واحد (Event Loop) يمنع التضارب
-    loop = asyncio.get_event_loop()
-    try:
-        loop.run_until_complete(main_startup())
-    except KeyboardInterrupt:
-        logging.info("🛑 تم إيقاف البوت يدوياً.")
-        
+        await bot.session.close()
