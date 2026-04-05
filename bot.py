@@ -918,25 +918,48 @@ async def process_transfer_amount(message: types.Message, state: FSMContext):
 # --- قسم القروض ---
 @dp.callback_query_handler(Text(startswith='repay_loan:'), state="*")
 async def repay_loan_handler(callback_query: types.CallbackQuery):
-    user_id = int(callback_query.data.split(':')[1])
-    user_data = await get_user_data(user_id)
-    
-    # قراءة البيانات كـ int
-    debt = int(user_data.get('debt_balance', 0) or 0)
-    bank_bal = int(user_data.get('bank_balance', 0) or 0)
-    
-    if bank_bal < debt:
-        return await callback_query.answer(f"❌ رصيدك ({bank_bal}$) أقل من القرض ({debt}$)", show_alert=True)
-    
-    # خصم الدين وتصفير الخانة
-    supabase.table("users_global_profile").update({
-        "bank_balance": bank_bal - debt,
-        "debt_balance": 0
-    }).eq("user_id", user_id).execute()
-    
-    await callback_query.answer("✅ تم سداد القرض بنجاح!", show_alert=True)
-    await process_wallet_logic(user_id, callback_query.from_user.first_name, callback=callback_query)
-    
+    try:
+        user_id = int(callback_query.data.split(':')[1])
+        
+        # جلب البيانات مباشرة لضمان أحدث الأرقام من قاعدة البيانات
+        res = supabase.table("users_global_profile").select("bank_balance, debt_balance").eq("user_id", user_id).execute()
+        
+        if not res.data:
+            return await callback_query.answer("❌ لم يتم العثور على بياناتك.", show_alert=True)
+            
+        user_data = res.data[0]
+        
+        # تحويل القيم إلى int لضمان عدم وجود أخطاء حسابية (التعامل مع None كـ 0)
+        debt = int(user_data.get('debt_balance', 0) or 0)
+        bank_bal = int(user_data.get('bank_balance', 0) or 0)
+        
+        # 1. التحقق إذا كان هناك دين أصلاً
+        if debt <= 0:
+            return await callback_query.answer("✅ ليس لديك أي ديون مستحقة لتسديدها!", show_alert=True)
+            
+        # 2. التحقق من كفاية الرصيد في البنك
+        if bank_bal < debt:
+            missing = debt - bank_bal
+            return await callback_query.answer(f"❌ رصيدك ({bank_bal:,}$) غير كافٍ.\nتحتاج لجمع {missing:,}$ إضافية للسداد.", show_alert=True)
+        
+        # 3. تنفيذ عملية الخصم والتصفير في سوبابيس
+        new_bank_balance = bank_bal - debt
+        
+        supabase.table("users_global_profile").update({
+            "bank_balance": new_bank_balance,
+            "debt_balance": 0
+        }).eq("user_id", user_id).execute()
+        
+        # 4. إشعار النجاح وتحديث المحفظة
+        await callback_query.answer(f"✅ تم سداد مبلغ {debt:,}$ بنجاح!\nرصيدك المتبقي: {new_bank_balance:,}$", show_alert=True)
+        
+        # تحديث واجهة المحفظة ليرى المستخدم أن الدين أصبح 0 وزر القرض عاد
+        await process_wallet_logic(user_id, callback_query.from_user.first_name, callback=callback_query)
+
+    except Exception as e:
+        logging.error(f"❌ Error in repay_loan: {e}")
+        await callback_query.answer("⚠️ حدث خطأ فني أثناء السداد.", show_alert=True)
+        
 @dp.callback_query_handler(Text(startswith='loan_menu:'), state="*")
 async def loan_menu(callback_query: types.CallbackQuery):
     user_id = callback_query.from_user.id
