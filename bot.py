@@ -430,7 +430,7 @@ async def process_wallet_logic(user_id, first_name, message=None, callback=None)
         )
 
         if debt > 0:
-            text += f"⚠️ <b>الـديون الـمستحقة:</b> <code>{debt:,.2f} $</code>\n"
+            text += f"⚠️ <b>الـديون الـمستحقة:</b> <code>{debt:,} $</code>\n"
         else:
             text += "✅ <b>حالة الائتمان:</b> سليم\n"
         
@@ -572,7 +572,7 @@ async def process_repay_loan(callback_query: types.CallbackQuery):
         "debt_balance": new_debt
     }).eq("user_id", user_id).execute()
     
-    await callback_query.answer(f"✅ تم تسديد {repay_amount:,.2f}$ من ديونك.", show_alert=True)
+    await callback_query.answer(f"✅ تم تسديد {repay_amount:,}$ من ديونك.", show_alert=True)
     await listener_wallet(callback_query.message)
     
 @dp.callback_query_handler(Text(startswith='market_tab:'))
@@ -753,9 +753,9 @@ async def process_trade_confirm(callback_query: types.CallbackQuery):
         text = "✅ <b>تـم فـتـح الـصـفـقـة بـنـجـاح!</b> 🚀\n\n"
         text += f"العملة: #{session['symbol']}\n"
         text += f"النوع: {session['side']}\n"
-        text += f"سعر الدخول: {current_price:,.4f} $\n"
-        text += f"المبلغ المحجوز: {margin_amount:,.2f} $\n"
-        text += f"رصيدك المتبقي: {new_balance:,.2f} $"
+        text += f"سعر الدخول: {current_price:,} $\n"
+        text += f"المبلغ المحجوز: {margin_amount:,} $\n"
+        text += f"رصيدك المتبقي: {new_balance:,} $"
         
         markup = InlineKeyboardMarkup()
         markup.add(InlineKeyboardButton("📋 عرض صفقاتي", callback_data=f"active_trades_view:{user_id}"))
