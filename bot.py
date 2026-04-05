@@ -651,33 +651,37 @@ async def process_coin_view(callback_query: types.CallbackQuery):
     await callback_query.message.edit_text(text, reply_markup=get_coin_keyboard(user_id, symbol), parse_mode="HTML")
 
 # ==========================================
-# 7. معالجات دورة الصفقة (Setup, Cycle, Confirm)
+# 7. معالجات دورة الصفقة (مزودة بـ state="*")
 # ==========================================
 
-@dp.callback_query_handler(Text(startswith='setup_trade:'))
+@dp.callback_query_handler(Text(startswith='setup_trade:'), state="*")
 async def process_setup_trade(callback_query: types.CallbackQuery):
     if not await is_authorized(callback_query): return
     
     user_id = callback_query.from_user.id
     _, _, symbol, side = callback_query.data.split(':')
     
-    coin = supabase.table("crypto_market_simulation").select("current_price").eq("symbol", symbol).execute().data[0]
-    price = float(coin['current_price'])
-    balance = await get_user_bank_balance(user_id)
-    
-    trade_sessions[user_id] = {
-        'symbol': symbol,
-        'side': side,
-        'entry_price': price,
-        'leverage': 10,
-        'margin_pct': 25,
-        'duration': '4h',
-        'balance': balance
-    }
-    
-    await update_trade_ui(callback_query)
+    try:
+        coin = supabase.table("crypto_market_simulation").select("current_price").eq("symbol", symbol).execute().data[0]
+        price = float(coin['current_price'])
+        balance = await get_user_bank_balance(user_id)
+        
+        trade_sessions[user_id] = {
+            'symbol': symbol,
+            'side': side,
+            'entry_price': price,
+            'leverage': 10,
+            'margin_pct': 25,
+            'duration': '4h',
+            'balance': balance
+        }
+        
+        await update_trade_ui(callback_query)
+    except Exception as e:
+        logging.error(f"Error in setup_trade: {e}")
+        await callback_query.answer("⚠️ حدث خطأ أثناء تجهيز الصفقة.", show_alert=True)
 
-@dp.callback_query_handler(Text(startswith='trade_cycle:'))
+@dp.callback_query_handler(Text(startswith='trade_cycle:'), state="*")
 async def process_trade_cycle(callback_query: types.CallbackQuery):
     if not await is_authorized(callback_query): return
     
@@ -700,7 +704,7 @@ async def process_trade_cycle(callback_query: types.CallbackQuery):
         
     await update_trade_ui(callback_query)
 
-@dp.callback_query_handler(Text(startswith='trade_confirm:'))
+@dp.callback_query_handler(Text(startswith='trade_confirm:'), state="*")
 async def process_trade_confirm(callback_query: types.CallbackQuery):
     if not await is_authorized(callback_query): return
     
@@ -714,17 +718,20 @@ async def process_trade_confirm(callback_query: types.CallbackQuery):
     if margin_amount <= 0 or margin_amount > session['balance']:
         return await callback_query.answer("❌ رصيدك غير كافٍ لهذه العملية!", show_alert=True)
         
-    coin_data = supabase.table("crypto_market_simulation").select("current_price").eq("symbol", session['symbol']).execute()
-    current_price = float(coin_data.data[0]['current_price'])
-    
-    quantity = (margin_amount * session['leverage']) / current_price
-    liq_price = calculate_liquidation(current_price, session['leverage'], session['side'])
-    expiry = datetime.now() + DURATION_MAP[session['duration']][1]
-    
     try:
+        coin_data = supabase.table("crypto_market_simulation").select("current_price").eq("symbol", session['symbol']).execute()
+        current_price = float(coin_data.data[0]['current_price'])
+        
+        quantity = (margin_amount * session['leverage']) / current_price
+        liq_price = calculate_liquidation(current_price, session['leverage'], session['side'])
+        expiry = datetime.now() + DURATION_MAP[session['duration']][1]
+        
         new_balance = session['balance'] - margin_amount
+        
+        # 1. سحب المبلغ من المستخدم
         supabase.table("users_global_profile").update({"bank_balance": new_balance}).eq("user_id", user_id).execute()
         
+        # 2. فتح الصفقة في الجدول
         supabase.table("active_trades").insert({
             "user_id": user_id,
             "symbol": session['symbol'],
@@ -738,14 +745,15 @@ async def process_trade_confirm(callback_query: types.CallbackQuery):
             "is_active": True
         }).execute()
         
+        # 3. مسح الجلسة بعد التأكيد
         del trade_sessions[user_id]
         
         text = "✅ <b>تـم فـتـح الـصـفـقـة بـنـجـاح!</b> 🚀\n\n"
         text += f"العملة: #{session['symbol']}\n"
         text += f"النوع: {session['side']}\n"
-        text += f"سعر الدخول: {current_price:,} $\n"
-        text += f"المبلغ المحجوز: {margin_amount:,} $\n"
-        text += f"رصيدك المتبقي: {new_balance:,} $"
+        text += f"سعر الدخول: {current_price:,.4f} $\n"
+        text += f"المبلغ المحجوز: {margin_amount:,.2f} $\n"
+        text += f"رصيدك المتبقي: {new_balance:,.2f} $"
         
         markup = InlineKeyboardMarkup()
         markup.add(InlineKeyboardButton("📋 عرض صفقاتي", callback_data=f"active_trades_view:{user_id}"))
