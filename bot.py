@@ -371,69 +371,78 @@ def get_trades_keyboard(user_id, trades):
     markup.add(InlineKeyboardButton("🔙 العودة للسوق", callback_data=f"market_tab:{user_id}:trending"))
     return markup
 # ==========================================
-# 4. مستمعات المحفظة (النصية + الأزرار الشفافة)
+# 4. مستمعات المحفظة (النسخة الاحترافية)
 # ==========================================
 
-# 1. الاستجابة في حال كتب المستخدم كلمة "محفظتي" يدوياً (أضفنا state="*" لكي يستجيب دائماً)
-@dp.message_handler(Text(equals=["محفظتي", "المحفظة"], ignore_case=True), state="*")
-async def listener_wallet_text(message: types.Message):
-    await process_wallet_view(message.from_user.id, message.from_user.first_name, message=message)
-
-# 2. الاستجابة في حال ضغط المستخدم على زر المحفظة الشفاف (Inline Button)
+# مستمع للأزرار الشفافة (Inline)
 @dp.callback_query_handler(lambda c: c.data and c.data.startswith('wallet_view:'), state="*")
-async def listener_wallet_callback(callback_query: types.CallbackQuery):
+async def callback_wallet_view(callback_query: types.CallbackQuery):
     user_id = int(callback_query.data.split(':')[1])
-    
-    # حماية: منع شخص آخر من فتح محفظة غيره
+    # التأكد من أن صاحب الطلب هو صاحب المحفظة
     if callback_query.from_user.id != user_id:
-        return await callback_query.answer("❌ هذه المحفظة لا تخصك!", show_alert=True)
+        return await callback_query.answer("❌ هذه البيانات ليست لك!", show_alert=True)
+    
+    await process_wallet_logic(user_id, callback_query.from_user.first_name, callback=callback_query)
+
+# مستمع للأوامر النصية
+@dp.message_handler(Text(equals=["محفظتي", "المحفظة", "wallet"], ignore_case=True), state="*")
+async def message_wallet_view(message: types.Message):
+    await process_wallet_logic(message.from_user.id, message.from_user.first_name, message=message)
+
+# المحرك المشترك لمعالجة البيانات (Logic Engine)
+async def process_wallet_logic(user_id, first_name, message=None, callback=None):
+    try:
+        # جلب البيانات من الجدول الذي أرسلته
+        res = supabase.table("users_global_profile").select("*").eq("user_id", user_id).execute()
+        data = res.data[0] if res.data else None
+
+        if not data:
+            error_msg = "❌ لم يتم العثور على حسابك. ارسل /start للتسجيل."
+            if message: await message.answer(error_msg)
+            else: await callback.answer(error_msg, show_alert=True)
+            return
+
+        # استخراج القيم من الجدول (مع ضمان تحويلها لأرقام)
+        # ملاحظة: استخدمت الأسماء المكتوبة في SQL الخاص بك (bank_balance, wallet, debt_balance)
+        bank_bal = float(data.get('bank_balance', 0))
+        wallet_bal = float(data.get('wallet', 0))
+        debt = float(data.get('debt_balance', 0))
+        rank = data.get('trading_rank', 'Beginner')
+
+        # فحص الصفقات النشطة من جدول الصفقات
+        trades_res = supabase.table("active_trades").select("id").eq("user_id", user_id).eq("is_active", True).execute()
+        active_count = len(trades_res.data) if trades_res.data else 0
+
+        text = (
+            f"🏦 | <b>مـركـز إدارة الأمـوال والأصول</b>\n"
+            f"━━━━━━━━━━━━━━━━━━\n"
+            f"👤 الـمـسـتـخدم: <b>{first_name}</b>\n"
+            f"🏅 الـرتبة: <b>{rank}</b>\n\n"
+            f"💳 <b>رصـيد الـمحفظة:</b> <code>{wallet_bal:,.2f} $</code>\n"
+            f"📈 <b>حـساب الـتداول:</b> <code>{bank_bal:,.2f} $</code>\n"
+            f"━━━━━━━━━━━━━━━━━━\n"
+            f"📊 صـفقات مـفـتوحة حالياً: <b>{active_count}</b>\n"
+        )
+
+        if debt > 0:
+            text += f"⚠️ <b>الـديون الـمستحقة:</b> <code>{debt:,.2f} $</code>\n"
+        else:
+            text += "✅ <b>حالة الائتمان:</b> سليم\n"
         
-    await process_wallet_view(user_id, callback_query.from_user.first_name, callback=callback_query)
+        text += "━━━━━━━━━━━━━━━━━━"
 
-# 3. الدالة الأساسية التي تعالج البيانات (لعدم تكرار الكود)
-async def process_wallet_view(user_id, first_name, message=None, callback=None):
-    # جلب بيانات المستخدم من قاعدة البيانات
-    data = await get_user_data(user_id)
-    
-    if not data: 
-        msg_text = "❌ <b>عذراً!</b> سجل حسابك أولاً بالضغط على /start"
-        if message: return await message.answer(msg_text, parse_mode="HTML")
-        if callback: return await callback.answer("سجل حسابك أولاً!", show_alert=True)
+        markup = get_wallet_keyboard(user_id, debt)
 
-    # تجهيز الأرقام (الجدول الخاص بك يستخدم numeric و bigint وهي متوافقة)
-    bank_bal = float(data.get('bank_balance', 0))
-    wallet_bal = float(data.get('wallet', 0))
-    debt = float(data.get('debt_balance', 0))
-    
-    # فحص الصفقات النشطة
-    trades_res = supabase.table("active_trades").select("id").eq("user_id", user_id).eq("is_active", True).execute()
-    active_count = len(trades_res.data) if trades_res.data else 0
-    
-    text = "🏦 | <b>مـركـز إدارة الأمـوال والأصول</b>\n"
-    text += "━━━━━━━━━━━━━━━━━━\n"
-    text += f"👤 الـمـسـتـخدم: <b>{first_name}</b>\n\n"
-    text += f"💳 <b>رصـيد الـمحفظة:</b> <code>{wallet_bal:,.2f} $</code>\n"
-    text += f"📈 <b>حـساب الـتداول:</b> <code>{bank_bal:,.2f} $</code>\n"
-    text += "━━━━━━━━━━━━━━━━━━\n"
-    text += f"📊 صـفقات مـفـتوحة حالياً: <b>{active_count}</b>\n"
-    
-    # فحص الديون لعرض التنبيه
-    if debt > 0:
-        text += f"⚠️ <b>الـديون الـمستحقة:</b> <code>{debt:,.2f} $</code>\n"
-    else:
-        text += "✅ <b>حالة الائتمان:</b> سليم\n"
-    
-    text += "━━━━━━━━━━━━━━━━━━\n"
-    
-    markup = get_wallet_keyboard(user_id, debt)
-    
-    # إرسال أو تعديل الرسالة بناءً على طريقة الطلب
-    if message:
-        await message.answer(text, reply_markup=markup, parse_mode="HTML")
-    elif callback:
-        await callback.message.edit_text(text, reply_markup=markup, parse_mode="HTML")
-        
+        if message:
+            await message.answer(text, reply_markup=markup, parse_mode="HTML")
+        elif callback:
+            # استخدام edit_text لتغيير الرسالة الحالية بسلاسة
+            await callback.message.edit_text(text, reply_markup=markup, parse_mode="HTML")
 
+    except Exception as e:
+        logging.error(f"❌ Error in wallet: {e}")
+        if message: await message.answer("⚠️ حدث خطأ أثناء جلب بيانات المحفظة.")
+            
 @dp.message_handler(Text(equals=["تداول", "السوق", "التداول"], ignore_case=True))
 async def listener_market(message: types.Message):
     user_id = message.from_user.id
