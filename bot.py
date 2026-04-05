@@ -111,7 +111,7 @@ async def market_engine():
             logging.error(f"❌ خطأ في محرك السوق: {e}")
             
         await asyncio.sleep(600) # تحديث كل دقيقة
-        
+
 async def trade_reaper():
     """رادار لمراقبة تصفية الصفقات وانتهاء الوقت"""
     while True:
@@ -437,8 +437,9 @@ def get_wallet_keyboard(user_id, debt):
 def get_trades_keyboard(user_id, trades):
     markup = InlineKeyboardMarkup(row_width=1) # يفضل عرض الصفقات عمودياً لسهولة التحكم
     for trade in trades:
+        # التعديل هنا: استخدام trade_id بدلاً من id
+        t_id = trade['trade_id'] 
         symbol = trade['symbol']
-        trade_id = trade['id']
         # إضافة أزرار كل صفقة في صف واحد (Row)
         markup.row(
             InlineKeyboardButton(f"🚀 تعزيز {symbol}", callback_data=f"dca_trade:{user_id}:{trade_id}"),
@@ -621,29 +622,26 @@ async def callback_market_tabs(callback_query: types.CallbackQuery):
     except Exception as e:
         logging.error(f"Error in market_tab: {e}")
         await callback_query.answer("⚠️ فشل تحديث بيانات السوق.", show_alert=True)
-        
+
 @dp.callback_query_handler(Text(startswith='active_trades_view:'))
 async def callback_view_trades(callback_query: types.CallbackQuery):
     if not await is_authorized(callback_query): return
     
-    # 🟢 إيقاف علامة التحميل المزعجة في الزر فور الضغط عليه
     await callback_query.answer()
-    
-    user_id = int(callback_query.from_user.id) # تأكيد الـ int كالعادة 🛡️
+    user_id = int(callback_query.from_user.id)
     
     try:
-        # جلب البيانات من الدالة التي عدلناها سابقاً
+        # جلب الصفقات المفتوحة
         trades, text = await get_active_trades_report(user_id)
         
         if not trades:
-            # إذا لم تكن هناك صفقات، يرجع به إلى لوحة السوق
             return await callback_query.message.edit_text(
                 text, 
                 reply_markup=get_market_keyboard(user_id), 
                 parse_mode="HTML"
             )
             
-        # إذا كان لديه صفقات، يعرضها مع أزرار التحكم بها
+        # ⚠️ تأكد أن دالة get_trades_keyboard تستخدم trade['trade_id'] وليس trade['id']
         await callback_query.message.edit_text(
             text, 
             reply_markup=get_trades_keyboard(user_id, trades), 
@@ -651,9 +649,11 @@ async def callback_view_trades(callback_query: types.CallbackQuery):
         )
         
     except Exception as e:
+        # إذا ظهر خطأ 'id' هنا مرة أخرى، فهذا يعني أن المشكلة في دالة get_trades_keyboard
         logging.error(f"Error loading trades view: {e}")
-        await callback_query.answer("❌ تعذر جلب الصفقات حالياً.", show_alert=True)
+        await callback_query.answer(f"❌ خطأ في البرمجة: {e}", show_alert=True)
         
+
 @dp.callback_query_handler(Text(startswith='coin_view:'))
 async def process_coin_view(callback_query: types.CallbackQuery):
     if not await is_authorized(callback_query): return
