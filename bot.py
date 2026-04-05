@@ -371,28 +371,23 @@ def get_trades_keyboard(user_id, trades):
     markup.add(InlineKeyboardButton("🔙 العودة للسوق", callback_data=f"market_tab:{user_id}:trending"))
     return markup
 # ==========================================
-# 4. مستمعات المحفظة (النسخة الاحترافية)
+# 4. مستمعات المحفظة (متوافق مع Trade_ID)
 # ==========================================
 
-# مستمع للأزرار الشفافة (Inline)
 @dp.callback_query_handler(lambda c: c.data and c.data.startswith('wallet_view:'), state="*")
 async def callback_wallet_view(callback_query: types.CallbackQuery):
     user_id = int(callback_query.data.split(':')[1])
-    # التأكد من أن صاحب الطلب هو صاحب المحفظة
     if callback_query.from_user.id != user_id:
-        return await callback_query.answer("❌ هذه البيانات ليست لك!", show_alert=True)
-    
+        return await callback_query.answer("❌ هذه المحفظة ليست لك!", show_alert=True)
     await process_wallet_logic(user_id, callback_query.from_user.first_name, callback=callback_query)
 
-# مستمع للأوامر النصية
-@dp.message_handler(Text(equals=["محفظتي", "المحفظة", "wallet"], ignore_case=True), state="*")
+@dp.message_handler(Text(equals=["محفظتي", "المحفظة"], ignore_case=True), state="*")
 async def message_wallet_view(message: types.Message):
     await process_wallet_logic(message.from_user.id, message.from_user.first_name, message=message)
 
-# المحرك المشترك لمعالجة البيانات (Logic Engine)
 async def process_wallet_logic(user_id, first_name, message=None, callback=None):
     try:
-        # جلب البيانات من الجدول الذي أرسلته
+        # 1. جلب بيانات المستخدم من الجدول الصحيح
         res = supabase.table("users_global_profile").select("*").eq("user_id", user_id).execute()
         data = res.data[0] if res.data else None
 
@@ -402,21 +397,22 @@ async def process_wallet_logic(user_id, first_name, message=None, callback=None)
             else: await callback.answer(error_msg, show_alert=True)
             return
 
-        # استخراج القيم من الجدول (مع ضمان تحويلها لأرقام)
-        # ملاحظة: استخدمت الأسماء المكتوبة في SQL الخاص بك (bank_balance, wallet, debt_balance)
+        # 2. استخراج القيم المالية (متوافق مع Numeric)
         bank_bal = float(data.get('bank_balance', 0))
         wallet_bal = float(data.get('wallet', 0))
         debt = float(data.get('debt_balance', 0))
         rank = data.get('trading_rank', 'Beginner')
+        flag = data.get('country_flag', '🇾🇪')
 
-        # فحص الصفقات النشطة من جدول الصفقات
-        trades_res = supabase.table("active_trades").select("id").eq("user_id", user_id).eq("is_active", True).execute()
+        # 3. فحص الصفقات النشطة (استخدام trade_id بدلاً من id)
+        trades_res = supabase.table("active_trades").select("trade_id").eq("user_id", user_id).eq("is_active", True).execute()
         active_count = len(trades_res.data) if trades_res.data else 0
 
+        # 4. تنسيق الرسالة
         text = (
             f"🏦 | <b>مـركـز إدارة الأمـوال والأصول</b>\n"
             f"━━━━━━━━━━━━━━━━━━\n"
-            f"👤 الـمـسـتـخدم: <b>{first_name}</b>\n"
+            f"👤 الـمـسـتـخدم: <b>{first_name}</b> {flag}\n"
             f"🏅 الـرتبة: <b>{rank}</b>\n\n"
             f"💳 <b>رصـيد الـمحفظة:</b> <code>{wallet_bal:,.2f} $</code>\n"
             f"📈 <b>حـساب الـتداول:</b> <code>{bank_bal:,.2f} $</code>\n"
@@ -431,17 +427,17 @@ async def process_wallet_logic(user_id, first_name, message=None, callback=None)
         
         text += "━━━━━━━━━━━━━━━━━━"
 
+        # 5. استدعاء الكيبورد
         markup = get_wallet_keyboard(user_id, debt)
 
         if message:
             await message.answer(text, reply_markup=markup, parse_mode="HTML")
         elif callback:
-            # استخدام edit_text لتغيير الرسالة الحالية بسلاسة
             await callback.message.edit_text(text, reply_markup=markup, parse_mode="HTML")
 
     except Exception as e:
-        logging.error(f"❌ Error in wallet: {e}")
-        if message: await message.answer("⚠️ حدث خطأ أثناء جلب بيانات المحفظة.")
+        logging.error(f"❌ Error in wallet logic: {e}")
+        if message: await message.answer("⚠️ حدث خطأ فني أثناء جلب بياناتك.")
             
 @dp.message_handler(Text(equals=["تداول", "السوق", "التداول"], ignore_case=True))
 async def listener_market(message: types.Message):
