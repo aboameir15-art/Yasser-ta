@@ -542,39 +542,61 @@ async def update_trade_ui(callback_query: types.CallbackQuery):
 # ==========================================
 # 6. معالجات الأزرار الأساسية (Secured Callbacks)
 # ==========================================
-
-@dp.callback_query_handler(Text(startswith='market_tab:'))
+@dp.callback_query_handler(Text(startswith='market_tab:'), state="*")
 async def callback_market_tabs(callback_query: types.CallbackQuery):
     if not await is_authorized(callback_query): return
     
-    user_id = callback_query.from_user.id
-    tab_type = callback_query.data.split(':')[2]
-    
-    # جلب العملات حسب الفلتر
-    if tab_type == 'gainers':
-        res = supabase.table("crypto_market_simulation").select("*").order("change_24h", desc=True).limit(5).execute()
-        header = "📈 <b>الأكثر ربحاً:</b>"
-    elif tab_type == 'losers':
-        res = supabase.table("crypto_market_simulation").select("*").order("change_24h", desc=False).limit(5).execute()
-        header = "📉 <b>الأكثر خسارة:</b>"
-    else: # trending
-        res = supabase.table("crypto_market_simulation").select("*").order("volume_24h", desc=True).limit(5).execute()
-        header = "🔥 <b>الأكثر رواجاً:</b>"
+    try:
+        data_parts = callback_query.data.split(':')
+        user_id = int(data_parts[1])
+        tab_type = data_parts[2]
         
-    text = f"📊 | <b>سـوق الـعـمـلات (Binance Mode)</b>\n━━━━━━━━━━━━━━━━━━\n{header}\n\n"
-    markup = get_market_keyboard(user_id)
-    
-    for c in res.data:
-        sym = c['symbol']
-        price = float(c['current_price'])
-        chg = float(c['change_24h'])
-        icon = "🟢" if chg >= 0 else "🔴"
-        text += f"{icon} <b>{sym}</b> : <code>{price:,.4f} $</code> ({chg:+.2f}%)\n"
-        markup.add(InlineKeyboardButton(f"عرض {sym} 🪙", callback_data=f"coin_view:{user_id}:{sym}"))
+        # الآن نستخدم قوة SQL للترتيب مباشرة بفضل العمود الجديد change_24h
+        if tab_type == 'gainers':
+            # جلب أعلى 5 عملات من حيث نسبة الربح
+            res = supabase.table("crypto_market_simulation").select("*").order("change_24h", desc=True).limit(5).execute()
+            header = "📈 <b>الأعلى ربحاً (24h):</b>"
+        elif tab_type == 'losers':
+            # جلب أكثر 5 عملات خسارة (من الأصغر للأكبر)
+            res = supabase.table("crypto_market_simulation").select("*").order("change_24h", desc=False).limit(5).execute()
+            header = "📉 <b>الأكثر خسارة (24h):</b>"
+        else: # trending
+            # جلب الأكثر سيولة (رواجاً) حسب الحجم
+            res = supabase.table("crypto_market_simulation").select("*").order("volume_24h", desc=True).limit(5).execute()
+            header = "🔥 <b>الأكثر رواجاً (السيولة):</b>"
+            
+        if not res.data:
+            return await callback_query.answer("⚠️ لا توجد بيانات حالياً.", show_alert=True)
 
-    await callback_query.message.edit_text(text, reply_markup=markup, parse_mode="HTML")
+        text = f"📊 | <b>سـوق الـعـمـلات (Binance Mode)</b>\n━━━━━━━━━━━━━━━━━━\n{header}\n\n"
+        markup = InlineKeyboardMarkup(row_width=2)
+        
+        for c in res.data:
+            sym = c['symbol']
+            price = float(c.get('current_price', 0))
+            # نستخدم العمود الجديد مباشرة
+            chg = float(c.get('change_24h', 0))
+            
+            icon = "🟢" if chg >= 0 else "🔴"
+            # تنسيق السعر 4 أرقام والنسبة رقمين
+            text += f"{icon} <b>{sym}</b> : <code>{price:,.4f}$</code> ({chg:+.2f}%)\n"
+            
+            markup.insert(InlineKeyboardButton(f"🪙 {sym}", callback_data=f"coin_view:{user_id}:{sym}"))
 
+        # أزرار التبويبات للتنقل السريع
+        markup.row(
+            InlineKeyboardButton("🔥 الرائجة", callback_data=f"market_tab:{user_id}:trending"),
+            InlineKeyboardButton("📈 الرابحة", callback_data=f"market_tab:{user_id}:gainers"),
+            InlineKeyboardButton("📉 الخاسرة", callback_data=f"market_tab:{user_id}:losers")
+        )
+        markup.row(InlineKeyboardButton("🔙 العودة للمحفظة", callback_data=f"wallet:{user_id}"))
 
+        await callback_query.message.edit_text(text, reply_markup=markup, parse_mode="HTML")
+
+    except Exception as e:
+        logging.error(f"Error in market_tab: {e}")
+        await callback_query.answer("⚠️ فشل تحديث بيانات السوق.", show_alert=True)
+        
 @dp.callback_query_handler(Text(startswith='active_trades_view:'))
 async def callback_view_trades(callback_query: types.CallbackQuery):
     if not await is_authorized(callback_query): return
