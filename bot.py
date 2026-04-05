@@ -340,18 +340,22 @@ def get_trade_setup_keyboard(user_id):
 
 def get_wallet_keyboard(user_id, debt):
     markup = InlineKeyboardMarkup(row_width=2)
-    # تصحيح: إضافة الفاصلة بين الزرين
+    
+    # صف الإيداع والسحب
     markup.row(
         InlineKeyboardButton("📥 إيداع للتداول", callback_data=f"transfer_flow:{user_id}:to_bank"),
         InlineKeyboardButton("📤 سحب للمحفظة", callback_data=f"transfer_flow:{user_id}:to_wallet")
     )
     
+    # زر القرض أو التسديد
     if debt > 0:
-        markup.add(InlineKeyboardButton("🔴 تسديد القرض", callback_data=f"repay_loan:{user_id}"))
+        # إذا كان عليه دين، يظهر زر التسديد باللون الأحمر (إيموجي)
+        markup.add(InlineKeyboardButton("🔴 تسديد القرض المستحق", callback_data=f"repay_loan:{user_id}"))
     else:
+        # إذا كان سليم، يظهر زر طلب القرض
         markup.add(InlineKeyboardButton("💰 طلب قرض سريع", callback_data=f"loan_menu:{user_id}"))
         
-    # تصحيح: إضافة الفاصلة بين الزرين في markup.add
+    # صف السوق والصفقات
     markup.row(
         InlineKeyboardButton("📋 صفقاتي", callback_data=f"active_trades_view:{user_id}"),
         InlineKeyboardButton("🛒 السوق", callback_data=f"market_tab:{user_id}:trending")
@@ -832,26 +836,33 @@ async def handle_manual_close_request(callback_query: types.CallbackQuery):
         await callback_query.answer("❌ فشل إغلاق الصفقة.")
 
 # ==========================================
-# 9. إدارة الأموال (Transfers & Loans)
+# 9. إدارة الأموال والقروض (المطورة)
 # ==========================================
 
-@dp.callback_query_handler(Text(startswith='transfer_flow:'))
+@dp.callback_query_handler(Text(startswith='transfer_flow:'), state="*")
 async def transfer_init(callback_query: types.CallbackQuery):
-    if not await is_authorized(callback_query): return
-    user_id = callback_query.from_user.id
-    direction = callback_query.data.split(':')[2]
+    data = callback_query.data.split(':')
+    user_id = int(data[1])
+    direction = data[2]
     
-    prompt = "📥 <b>إيداع للتداول</b>\nأدخل المبلغ المراد تحويله من محفظتك إلى التداول:" if direction == "to_bank" else \
-             "📤 <b>سحب للمحفظة</b>\nأدخل المبلغ المراد سحبه (سيتم فحص الديون والصفقات):"
+    if callback_query.from_user.id != user_id:
+        return await callback_query.answer("❌ لا يمكنك التحكم بأموال غيرك!", show_alert=True)
     
+    prompt = "📥 <b>إيداع للتداول</b>\nأرسل المبلغ الذي تريد تحويله من محفظتك (Wallet) إلى حساب التداول (Bank):" if direction == "to_bank" else \
+             "📤 <b>سحب للمحفظة</b>\nأرسل المبلغ الذي تريد سحبه إلى محفظتك الشخصية:"
+    
+    # استخدام ForceReply لضمان التقاط الرد
     await bot.send_message(callback_query.message.chat.id, prompt, reply_markup=types.ForceReply(selective=True), parse_mode="HTML")
+    
+    # تخزين الحالة مؤقتاً
     trade_sessions[f"wait_trans_{user_id}"] = direction
     await callback_query.answer()
 
-@dp.message_handler(lambda m: m.reply_to_message and ("إيداع للتداول" in m.reply_to_message.text or "سحب للمحفظة" in m.reply_to_message.text))
+@dp.message_handler(lambda m: m.reply_to_message and ("إيداع للتداول" in m.reply_to_message.text or "سحب للمحفظة" in m.reply_to_message.text), state="*")
 async def transfer_processor(message: types.Message):
     user_id = message.from_user.id
     key = f"wait_trans_{user_id}"
+    
     if key not in trade_sessions: return
     
     direction = trade_sessions[key]
@@ -859,71 +870,84 @@ async def transfer_processor(message: types.Message):
         amount = float(message.text)
         if amount <= 0: raise ValueError
     except:
-        return await message.reply("❌ يرجى إدخال رقم صحيح.")
+        return await message.reply("❌ يرجى إدخال مبلغ صحيح (رقم فقط).")
 
-    is_safe, msg = await check_financial_health(user_id, amount, "WITHDRAW" if direction == "to_wallet" else "DEPOSIT")
-    if not is_safe: return await message.reply(msg)
+    # جلب البيانات الحالية
+    user_data = await get_user_data(user_id)
+    if not user_data: return
+    
+    current_wallet = float(user_data.get('wallet', 0))
+    current_bank = float(user_data.get('bank_balance', 0))
 
-    data = await get_user_data(user_id)
     if direction == "to_bank":
-        if amount > float(data['wallet']): return await message.reply("❌ رصيد المحفظة غير كافٍ.")
-        supabase.table("users_global_profile").update({"wallet": float(data['wallet'])-amount, "bank_balance": float(data['bank_balance'])+amount}).eq("user_id", user_id).execute()
-    else:
-        supabase.table("users_global_profile").update({"bank_balance": float(data['bank_balance'])-amount, "wallet": float(data['wallet'])+amount}).eq("user_id", user_id).execute()
+        if amount > current_wallet:
+            return await message.reply(f"❌ رصيد محفظتك غير كافٍ. المتاح: {current_wallet:,.2f} $")
+        
+        # تنفيذ العملية: خصم من المحفظة وإضافة للبنك
+        supabase.table("users_global_profile").update({
+            "wallet": current_wallet - amount,
+            "bank_balance": current_bank + amount
+        }).eq("user_id", user_id).execute()
+    
+    else: # سحب للمحفظة
+        # فحص الأمان (الديون والصفقات)
+        is_safe, msg = await check_financial_health(user_id, amount, "WITHDRAW")
+        if not is_safe: return await message.reply(msg)
+        
+        if amount > current_bank:
+            return await message.reply(f"❌ رصيد التداول غير كافٍ. المتاح: {current_bank:,.2f} $")
+
+        # تنفيذ العملية: خصم من البنك وإضافة للمحفظة
+        supabase.table("users_global_profile").update({
+            "bank_balance": current_bank - amount,
+            "wallet": current_wallet + amount
+        }).eq("user_id", user_id).execute()
 
     del trade_sessions[key]
     await message.reply(f"✅ تم تحويل <b>{amount:,.2f} $</b> بنجاح!", parse_mode="HTML")
+    # تحديث واجهة المحفظة بعد التحويل
+    await process_wallet_logic(user_id, message.from_user.first_name, message=message)
 
-@dp.callback_query_handler(Text(startswith='loan_menu:'))
-async def loan_menu(callback_query: types.CallbackQuery):
-    if not await is_authorized(callback_query): return
-    user_id = callback_query.from_user.id
+# --- قسم القروض ---
+
+@dp.callback_query_handler(Text(startswith='repay_loan:'), state="*")
+async def repay_loan_handler(callback_query: types.CallbackQuery):
+    user_id = int(callback_query.data.split(':')[1])
+    user_data = await get_user_data(user_id)
     
-    is_safe, msg = await check_financial_health(user_id, 0, "BORROW")
-    if not is_safe: return await callback_query.answer(msg, show_alert=True)
+    debt = float(user_data.get('debt_balance', 0))
+    bank_bal = float(user_data.get('bank_balance', 0))
     
-    data = await get_user_data(user_id)
-    max_loan = float(data['bank_balance']) * 0.5 
-
-    markup = InlineKeyboardMarkup()
-    markup.add(InlineKeyboardButton(f"💰 اقتراض {max_loan:,.2f} $ (قرض ذكي)", callback_data=f"exec_loan:{user_id}:{max_loan}"))
-    markup.add(InlineKeyboardButton("🔙 عودة للمحفظة", callback_data=f"wallet_view:{user_id}"))
+    if bank_bal < debt:
+        return await callback_query.answer(f"❌ رصيد تداولك ({bank_bal:,.2f}$) أقل من الدين المستحق!", show_alert=True)
     
-    text = f"🏦 | <b>مـركـز الائـتـمـان والـقـروض</b>\n━━━━━━━━━━━━━━━━━━\n"
-    text += "نظام القرض الذكي يمنحك سيولة بضمان رصيدك الحالي.\n\n"
-    text += f"💵 الـمبلغ الـمتاح لك حالياً: <b>{max_loan:,.2f} $</b>\n━━━━━━━━━━━━━━━━━━\n"
-    text += "<i>* تنبيه: لا يمكن السحب للمحفظة قبل سداد كامل القرض.</i>"
+    # سداد الدين
+    supabase.table("users_global_profile").update({
+        "bank_balance": bank_bal - debt,
+        "debt_balance": 0
+    }).eq("user_id", user_id).execute()
+    
+    await callback_query.answer("✅ تم سداد القرض بنجاح! تم فك حجز السحوبات.", show_alert=True)
+    await process_wallet_logic(user_id, callback_query.from_user.first_name, callback=callback_query)
 
-    await callback_query.message.edit_text(text, reply_markup=markup, parse_mode="HTML")
-
-@dp.callback_query_handler(Text(startswith='exec_loan:'))
+@dp.callback_query_handler(Text(startswith='exec_loan:'), state="*")
 async def exec_loan_handler(callback_query: types.CallbackQuery):
-    if not await is_authorized(callback_query): return
-    
     data = callback_query.data.split(':')
     user_id = int(data[1])
     loan_amount = float(data[2])
     
     user_data = await get_user_data(user_id)
-    if not user_data: return await callback_query.answer("❌ خطأ: ملف اللاعب مفقود.")
-
     new_bank = float(user_data.get('bank_balance', 0)) + loan_amount
     new_debt = float(user_data.get('debt_balance', 0)) + loan_amount
 
-    try:
-        supabase.table("users_global_profile").update({
-            "bank_balance": new_bank,
-            "debt_balance": new_debt,
-            "last_loan_date": datetime.now().isoformat() 
-        }).eq("user_id", user_id).execute()
-        
-        await callback_query.answer(f"✅ تم إيداع {loan_amount:,.2f} $ كقرض بنجاح.", show_alert=True)
-        await listener_wallet(callback_query.message) # تحديث الواجهة
-        
-    except Exception as e:
-        logging.error(f"Loan Error: {e}")
-        await callback_query.answer("❌ فشل التنفيذ، حاول لاحقاً.", show_alert=True)
-        
+    supabase.table("users_global_profile").update({
+        "bank_balance": new_bank,
+        "debt_balance": new_debt
+    }).eq("user_id", user_id).execute()
+    
+    await callback_query.answer(f"✅ تم إيداع {loan_amount:,.2f} $ كقرض.", show_alert=True)
+    await process_wallet_logic(user_id, callback_query.from_user.first_name, callback=callback_query)
+    
         
         # ==========================================
 # 5. نهاية الملف: نظام الإنعاش الأبدي 24/7 (النبض الذاتي) ⚡
