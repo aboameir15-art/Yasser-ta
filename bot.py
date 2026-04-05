@@ -110,7 +110,7 @@ async def market_engine():
         except Exception as e:
             logging.error(f"❌ خطأ في محرك السوق: {e}")
             
-        await asyncio.sleep(60) # تحديث كل دقيقة
+        await asyncio.sleep(600) # تحديث كل دقيقة
         
 async def trade_reaper():
     """رادار لمراقبة تصفية الصفقات وانتهاء الوقت"""
@@ -149,7 +149,7 @@ async def trade_reaper():
         except Exception as e:
             logging.error(f"❌ خطأ في رادار التصفية: {e}")
             
-        await asyncio.sleep(30) # فحص كل 30 ثانية
+        await asyncio.sleep(600) # فحص كل 30 ثانية
         
         
 def calculate_liquidation(entry_price, leverage, side):
