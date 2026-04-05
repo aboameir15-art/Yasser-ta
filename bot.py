@@ -543,38 +543,6 @@ async def update_trade_ui(callback_query: types.CallbackQuery):
 # 6. معالجات الأزرار الأساسية (Secured Callbacks)
 # ==========================================
 
-@dp.callback_query_handler(Text(startswith='repay_loan:'))
-async def process_repay_loan(callback_query: types.CallbackQuery):
-    if not await is_authorized(callback_query): return
-    
-    user_id = callback_query.from_user.id
-    user_data = await get_user_data(user_id)
-    
-    bank_bal = float(user_data['bank_balance'])
-    debt = float(user_data['debt_balance'])
-    
-    if debt <= 0:
-        return await callback_query.answer("✅ ليس لديك ديون لتسديدها!", show_alert=True)
-        
-    if bank_bal < debt:
-        # تسديد جزئي إذا كان الرصيد أقل من الدين
-        repay_amount = bank_bal
-        new_debt = debt - repay_amount
-        new_bank = 0
-    else:
-        # تسديد كامل
-        repay_amount = debt
-        new_debt = 0
-        new_bank = bank_bal - repay_amount
-        
-    supabase.table("users_global_profile").update({
-        "bank_balance": new_bank,
-        "debt_balance": new_debt
-    }).eq("user_id", user_id).execute()
-    
-    await callback_query.answer(f"✅ تم تسديد {repay_amount:,}$ من ديونك.", show_alert=True)
-    await listener_wallet(callback_query.message)
-    
 @dp.callback_query_handler(Text(startswith='market_tab:'))
 async def callback_market_tabs(callback_query: types.CallbackQuery):
     if not await is_authorized(callback_query): return
