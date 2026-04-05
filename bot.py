@@ -546,15 +546,15 @@ async def callback_market_tabs(callback_query: types.CallbackQuery):
         # الآن نستخدم قوة SQL للترتيب مباشرة بفضل العمود الجديد change_24h
         if tab_type == 'gainers':
             # جلب أعلى 5 عملات من حيث نسبة الربح
-            res = supabase.table("crypto_market_simulation").select("*").order("change_24h", desc=True).limit(5).execute()
+            res = supabase.table("crypto_market_simulation").select("*").order("change_24h", desc=True).limit(15).execute()
             header = "📈 <b>الأعلى ربحاً (24h):</b>"
         elif tab_type == 'losers':
             # جلب أكثر 5 عملات خسارة (من الأصغر للأكبر)
-            res = supabase.table("crypto_market_simulation").select("*").order("change_24h", desc=False).limit(5).execute()
+            res = supabase.table("crypto_market_simulation").select("*").order("change_24h", desc=False).limit(20).execute()
             header = "📉 <b>الأكثر خسارة (24h):</b>"
         else: # trending
             # جلب الأكثر سيولة (رواجاً) حسب الحجم
-            res = supabase.table("crypto_market_simulation").select("*").order("volume_24h", desc=True).limit(5).execute()
+            res = supabase.table("crypto_market_simulation").select("*").order("volume_24h", desc=True).limit(20).execute()
             header = "🔥 <b>الأكثر رواجاً (السيولة):</b>"
             
         if not res.data:
