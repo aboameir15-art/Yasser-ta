@@ -15,12 +15,21 @@ supabase: Client = create_client(SUPABASE_URL, SUPABASE_KEY)
 def populate_crypto_table():
     print("⏳ جاري سحب البيانات الحية من بينانس...")
     
-    url = "https://api.binance.com/api/v3/ticker/24hr"
-    response = requests.get(url)
+    url = "https://api1.binance.com/api/v3/ticker/24hr"
+    # إضافة تعريف المتصفح لتجنب الحظر
+    headers = {
+        'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/91.0.4472.124 Safari/537.36'
+    }
     
-    if response.status_code != 200:
-        print("❌ فشل الاتصال ببينانس!")
+    try:
+        response = requests.get(url, headers=headers, timeout=20) # أضفنا مهلة زمنية (timeout)
+        if response.status_code != 200:
+            print(f"❌ فشل الاتصال! كود الخطأ: {response.status_code}")
+            return
+    except Exception as e:
+        print(f"❌ حدث خطأ أثناء الطلب: {e}")
         return
+
 
     data = response.json()
     usdt_pairs = [coin for coin in data if coin['symbol'].endswith('USDT')]
