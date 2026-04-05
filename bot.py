@@ -374,6 +374,10 @@ def get_trades_keyboard(user_id, trades):
         )
     markup.add(InlineKeyboardButton("🔙 العودة للسوق", callback_data=f"market_tab:{user_id}:trending"))
     return markup
+
+class BankTransfer(StatesGroup):
+    waiting_for_amount = State()      # انتظار مبلغ التحويل/الإيداع
+    waiting_for_account = State()     # انتظار رقم الحساب (في حال التحويل لشخص)
 # ==========================================
 # 4. مستمعات المحفظة (متوافق مع Trade_ID)
 # ==========================================
@@ -838,63 +842,87 @@ async def handle_manual_close_request(callback_query: types.CallbackQuery):
 # ==========================================
 # 9. إدارة الأموال والقروض (المطورة)
 # ==========================================
-
+# --- [ 1. بدء عملية التحويل الداخلي ] ---
 @dp.callback_query_handler(Text(startswith='transfer_flow:'), state="*")
-async def transfer_init(callback_query: types.CallbackQuery):
+async def transfer_init(callback_query: types.CallbackQuery, state: FSMContext):
     data = callback_query.data.split(':')
     user_id = int(data[1])
-    direction = data[2]
+    direction = data[2] # to_bank أو to_wallet
     
     if callback_query.from_user.id != user_id:
         return await callback_query.answer("❌ لا يمكنك التحكم بأموال غيرك!", show_alert=True)
     
-    prompt = "📥 <b>إيداع للتداول</b>\nأرسل المبلغ الذي تريد تحويله من محفظتك (Wallet) إلى حساب التداول (Bank):" if direction == "to_bank" else \
-             "📤 <b>سحب للمحفظة</b>\nأرسل المبلغ الذي تريد سحبه إلى محفظتك الشخصية:"
+    # حفظ الاتجاه في الذاكرة المؤقتة
+    await state.update_data(trans_direction=direction)
+    await BankTransfer.waiting_for_amount.set()
     
-    # استخدام ForceReply لضمان التقاط الرد
-    await bot.send_message(callback_query.message.chat.id, prompt, reply_markup=types.ForceReply(selective=True), parse_mode="HTML")
+    prompt = "📥 <b>إيداع للتداول</b>\nأرسل الآن المبلغ الذي تريد تحويله إلى حساب التداول:" if direction == "to_bank" else \
+             "📤 <b>سحب للمحفظة</b>\nأرسل الآن المبلغ الذي تريد سحبه لمحفظتك الشخصية:"
     
-    # تخزين الحالة مؤقتاً
-    trade_sessions[f"wait_trans_{user_id}"] = direction
+    await callback_query.message.answer(prompt, parse_mode="HTML")
     await callback_query.answer()
 
-@dp.message_handler(lambda m: m.reply_to_message and ("إيداع للتداول" in m.reply_to_message.text or "سحب للمحفظة" in m.reply_to_message.text), state="*")
-async def transfer_processor(message: types.Message):
+# --- [ 2. معالجة المبلغ وتنفيذ التحديث في سوبابيس ] ---
+@dp.message_handler(state=BankTransfer.waiting_for_amount)
+async def process_transfer_amount(message: types.Message, state: FSMContext):
     user_id = message.from_user.id
-    key = f"wait_trans_{user_id}"
-    if key not in trade_sessions: return
     
-    direction = trade_sessions[key]
+    # التأكد أن المدخل رقم (float للتعامل مع الكسور)
     try:
         amount = float(message.text)
         if amount <= 0: raise ValueError
-    except:
-        return await message.reply("❌ يرجى إدخال مبلغ صحيح.")
+    except ValueError:
+        return await message.reply("⚠️ يرجى إرسال مبلغ صحيح (أرقام فقط).")
 
-    user_data = await get_user_data(user_id)
-    # استخدام or 0 يمنع خطأ 22P02 إذا كانت الخانة فارغة في سوبابيس
+    # جلب الاتجاه من الذاكرة
+    state_data = await state.get_data()
+    direction = state_data.get('trans_direction')
+
+    # جلب بيانات المستخدم لضمان الأرقام الصحيحة
+    user_res = supabase.table("users_global_profile").select("*").eq("user_id", user_id).execute()
+    if not user_res.data:
+        await state.finish()
+        return await message.reply("❌ لم يتم العثور على حسابك.")
+    
+    user_data = user_res.data[0]
     wallet_bal = float(user_data.get('wallet', 0) or 0)
     bank_bal = float(user_data.get('bank_balance', 0) or 0)
 
-    if direction == "to_bank":
-        if amount > wallet_bal: return await message.reply("❌ رصيد المحفظة غير كافٍ.")
-        supabase.table("users_global_profile").update({
-            "wallet": wallet_bal - amount, 
-            "bank_balance": bank_bal + amount
-        }).eq("user_id", user_id).execute()
-    else:
-        is_safe, msg = await check_financial_health(user_id, amount, "WITHDRAW")
-        if not is_safe: return await message.reply(msg)
-        
-        if amount > bank_bal: return await message.reply("❌ رصيد البنك غير كافٍ.")
-        supabase.table("users_global_profile").update({
-            "bank_balance": bank_bal - amount, 
-            "wallet": wallet_bal + amount
-        }).eq("user_id", user_id).execute()
+    try:
+        if direction == "to_bank":
+            if amount > wallet_bal:
+                return await message.reply(f"❌ رصيدك في المحفظة غير كافٍ ({wallet_bal:,.2f} $)")
+            
+            # تحديث سوبابيس (إرسال أرقام صافية لتجنب 22P02)
+            supabase.table("users_global_profile").update({
+                "wallet": wallet_bal - amount,
+                "bank_balance": bank_bal + amount
+            }).eq("user_id", user_id).execute()
+            
+        else: # سحب للمحفظة (to_wallet)
+            # فحص الديون والصفقات
+            is_safe, health_msg = await check_financial_health(user_id, amount, "WITHDRAW")
+            if not is_safe:
+                return await message.reply(health_msg)
+            
+            if amount > bank_bal:
+                return await message.reply(f"❌ رصيد التداول غير كافٍ ({bank_bal:,.2f} $)")
 
-    del trade_sessions[key]
-    await message.reply(f"✅ تم تحويل <b>{amount:,.2f} $</b> بنجاح!", parse_mode="HTML")
-    await process_wallet_logic(user_id, message.from_user.first_name, message=message)    
+            supabase.table("users_global_profile").update({
+                "bank_balance": bank_bal - amount,
+                "wallet": wallet_bal + amount
+            }).eq("user_id", user_id).execute()
+
+        await message.answer(f"✅ تم تحويل <b>{amount:,.2f} $</b> بنجاح!", parse_mode="HTML")
+        # تحديث واجهة المحفظة تلقائياً
+        await process_wallet_logic(user_id, message.from_user.first_name, message=message)
+        
+    except Exception as e:
+        logging.error(f"❌ Transfer Error: {e}")
+        await message.reply("⚠️ حدث خطأ أثناء التحديث في قاعدة البيانات.")
+    
+    finally:
+        await state.finish() # إنهاء الحالة دائماً
 
 # --- قسم القروض ---
 
@@ -920,30 +948,25 @@ async def repay_loan_handler(callback_query: types.CallbackQuery):
     
 @dp.callback_query_handler(Text(startswith='exec_loan:'), state="*")
 async def exec_loan_handler(callback_query: types.CallbackQuery):
-    try:
-        data = callback_query.data.split(':')
-        user_id = int(data[1])
-        loan_amount = float(data[2])
-        
-        user_data = await get_user_data(user_id)
-        # التأكد من تحويل القيم إلى أرقام لتجنب 22P02
-        current_bank = float(user_data.get('bank_balance', 0) or 0)
-        current_debt = float(user_data.get('debt_balance', 0) or 0)
+    data = callback_query.data.split(':')
+    user_id = int(data[1])
+    loan_amount = float(data[2])
+    
+    user_res = supabase.table("users_global_profile").select("bank_balance, debt_balance").eq("user_id", user_id).execute()
+    if not user_res.data: return
+    
+    current_bank = float(user_res.data[0].get('bank_balance', 0) or 0)
+    current_debt = float(user_res.data[0].get('debt_balance', 0) or 0)
 
-        # تنفيذ التحديث (حذفنا last_loan_date مؤقتاً لتجنب خطأ النوع)
-        supabase.table("users_global_profile").update({
-            "bank_balance": current_bank + loan_amount,
-            "debt_balance": current_debt + loan_amount
-        }).eq("user_id", user_id).execute()
-        
-        await callback_query.answer(f"✅ تم إيداع {loan_amount:,.2f} $ كقرض بنجاح.", show_alert=True)
-        # تحديث واجهة المحفظة
-        await process_wallet_logic(user_id, callback_query.from_user.first_name, callback=callback_query)
-        
-    except Exception as e:
-        logging.error(f"❌ Loan Exec Error: {e}")
-        await callback_query.answer("❌ فشل في معالجة القرض بقاعدة البيانات.", show_alert=True)
-
+    # تحديث سوبابيس (بدون حقول التاريخ حالياً لضمان الاستقرار)
+    supabase.table("users_global_profile").update({
+        "bank_balance": current_bank + loan_amount,
+        "debt_balance": current_debt + loan_amount
+    }).eq("user_id", user_id).execute()
+    
+    await callback_query.answer(f"✅ تم إيداع {loan_amount:,.2f} $ كقرض.", show_alert=True)
+    await process_wallet_logic(user_id, callback_query.from_user.first_name, callback=callback_query)
+    
         # ==========================================
 # 5. نهاية الملف: نظام الإنعاش الأبدي 24/7 (النبض الذاتي) ⚡
 # ==========================================
