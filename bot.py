@@ -937,28 +937,74 @@ async def repay_loan_handler(callback_query: types.CallbackQuery):
     await callback_query.answer("✅ تم سداد القرض بنجاح!", show_alert=True)
     await process_wallet_logic(user_id, callback_query.from_user.first_name, callback=callback_query)
     
+@dp.callback_query_handler(Text(startswith='loan_menu:'), state="*")
+async def loan_menu(callback_query: types.CallbackQuery):
+    user_id = callback_query.from_user.id
+    
+    # جلب بيانات المستخدم
+    user_data = await get_user_data(user_id)
+    if not user_data: return
+    
+    # 1. التحقق من الدين الحالي
+    current_debt = int(user_data.get('debt_balance', 0) or 0)
+    # 2. التحقق من إجمالي التداولات (كمعيار للأهلية أو استخدام حقل مخصص إذا أردت منعه للأبد)
+    # هنا سنعتمد على وجود دين حالي، أو يمكنك إضافة شرط "مرة واحدة" بناءً على منطقك الخاص
+    
+    if current_debt > 0:
+        return await callback_query.answer("⚠️ لديك قرض نشط بالفعل، يجب سداده أولاً!", show_alert=True)
+
+    loan_amount = 10000  # المبلغ الثابت الذي طلبته
+    
+    markup = InlineKeyboardMarkup()
+    # زر التنفيذ يرسل المبلغ الثابت
+    markup.add(InlineKeyboardButton(f"💰 اقتراض {loan_amount:,} $ (مرة واحدة)", callback_data=f"exec_loan:{user_id}:{loan_amount}"))
+    markup.add(InlineKeyboardButton("🔙 عودة للمحفظة", callback_data=f"wallet_view:{user_id}"))
+    
+    text = (
+        f"🏦 | <b>مـركـز الائـتـمـان والـقـروض</b>\n"
+        f"━━━━━━━━━━━━━━━━━━\n"
+        f"مرحباً بك في نظام القروض الموحد.\n"
+        f"يمكنك الحصول على سيولة فورية لبدء تداولاتك.\n\n"
+        f"💵 الـمبلغ الـمتاح لك: <b>{loan_amount:,} $</b>\n"
+        f"━━━━━━━━━━━━━━━━━━\n"
+        f"<i>* تنبيه: سيتم خصم القرض من أرباحك لاحقاً عند السداد.</i>"
+    )
+
+    await callback_query.message.edit_text(text, reply_markup=markup, parse_mode="HTML")
 
 @dp.callback_query_handler(Text(startswith='exec_loan:'), state="*")
 async def exec_loan_handler(callback_query: types.CallbackQuery):
     data = callback_query.data.split(':')
     user_id = int(data[1])
-    loan_amount = float(data[2])
+    loan_amount = int(data[2]) # التأكد أنه رقم صحيح
     
-    user_res = supabase.table("users_global_profile").select("bank_balance, debt_balance").eq("user_id", user_id).execute()
-    if not user_res.data: return
+    if callback_query.from_user.id != user_id:
+        return await callback_query.answer("❌ خطأ في الهوية", show_alert=True)
     
-    current_bank = float(user_res.data[0].get('bank_balance', 0) or 0)
-    current_debt = float(user_res.data[0].get('debt_balance', 0) or 0)
+    user_data = await get_user_data(user_id)
+    if not user_data: return
 
-    # تحديث سوبابيس (بدون حقول التاريخ حالياً لضمان الاستقرار)
-    supabase.table("users_global_profile").update({
-        "bank_balance": current_bank + loan_amount,
-        "debt_balance": current_debt + loan_amount
-    }).eq("user_id", user_id).execute()
-    
-    await callback_query.answer(f"✅ تم إيداع {loan_amount:,.2f} $ كقرض.", show_alert=True)
-    await process_wallet_logic(user_id, callback_query.from_user.first_name, callback=callback_query)
-    
+    # حساب القيم الجديدة كأرقام صحيحة
+    new_bank = int(user_data.get('bank_balance', 0) or 0) + loan_amount
+    new_debt = int(user_data.get('debt_balance', 0) or 0) + loan_amount
+
+    try:
+        # التحديث في سوبابيس (أعمدة الـ int)
+        supabase.table("users_global_profile").update({
+            "bank_balance": new_bank,
+            "debt_balance": new_debt
+            # ملاحظة: حذفنا last_loan_date لتجنب خطأ 22P02 إذا لم يكن العمود جاهزاً
+        }).eq("user_id", user_id).execute()
+        
+        await callback_query.answer(f"✅ تم منحك قرض بقيمة {loan_amount:,} $ بنجاح!", show_alert=True)
+        
+        # تحديث واجهة المحفظة فوراً ليرى المستخدم الرصيد الجديد
+        await process_wallet_logic(user_id, callback_query.from_user.first_name, callback=callback_query)
+        
+    except Exception as e:
+        logging.error(f"❌ Loan Error: {e}")
+        await callback_query.answer("❌ فشل في تحديث قاعدة البيانات، حاول لاحقاً.", show_alert=True)
+        
         # ==========================================
 # 5. نهاية الملف: نظام الإنعاش الأبدي 24/7 (النبض الذاتي) ⚡
 # ==========================================
