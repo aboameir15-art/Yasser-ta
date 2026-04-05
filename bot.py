@@ -150,11 +150,20 @@ async def trade_reaper():
             logging.error(f"❌ خطأ في رادار التصفية: {e}")
             
         await asyncio.sleep(600) # فحص كل 30 ثانية
-        
-        
+                
 # ==========================================
 # 1. الدوال الحسابية (Math Core)
 # ==========================================
+async def get_user_bank_balance(user_id):
+    """جلب رصيد المستخدم من قاعدة البيانات"""
+    try:
+        res = supabase.table("users_global_profile").select("bank_balance").eq("user_id", user_id).execute()
+        if res.data:
+            return float(res.data[0]['bank_balance'])
+        return 0.0
+    except:
+        return 0.0
+
 
 def calculate_liquidation(entry_price, leverage, side):
     """حساب سعر التصفية: السعر الذي تفقد عنده كامل الهامش"""
