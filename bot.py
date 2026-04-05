@@ -862,7 +862,6 @@ async def transfer_init(callback_query: types.CallbackQuery):
 async def transfer_processor(message: types.Message):
     user_id = message.from_user.id
     key = f"wait_trans_{user_id}"
-    
     if key not in trade_sessions: return
     
     direction = trade_sessions[key]
@@ -870,43 +869,32 @@ async def transfer_processor(message: types.Message):
         amount = float(message.text)
         if amount <= 0: raise ValueError
     except:
-        return await message.reply("❌ يرجى إدخال مبلغ صحيح (رقم فقط).")
+        return await message.reply("❌ يرجى إدخال مبلغ صحيح.")
 
-    # جلب البيانات الحالية
     user_data = await get_user_data(user_id)
-    if not user_data: return
-    
-    current_wallet = float(user_data.get('wallet', 0))
-    current_bank = float(user_data.get('bank_balance', 0))
+    # استخدام or 0 يمنع خطأ 22P02 إذا كانت الخانة فارغة في سوبابيس
+    wallet_bal = float(user_data.get('wallet', 0) or 0)
+    bank_bal = float(user_data.get('bank_balance', 0) or 0)
 
     if direction == "to_bank":
-        if amount > current_wallet:
-            return await message.reply(f"❌ رصيد محفظتك غير كافٍ. المتاح: {current_wallet:,.2f} $")
-        
-        # تنفيذ العملية: خصم من المحفظة وإضافة للبنك
+        if amount > wallet_bal: return await message.reply("❌ رصيد المحفظة غير كافٍ.")
         supabase.table("users_global_profile").update({
-            "wallet": current_wallet - amount,
-            "bank_balance": current_bank + amount
+            "wallet": wallet_bal - amount, 
+            "bank_balance": bank_bal + amount
         }).eq("user_id", user_id).execute()
-    
-    else: # سحب للمحفظة
-        # فحص الأمان (الديون والصفقات)
+    else:
         is_safe, msg = await check_financial_health(user_id, amount, "WITHDRAW")
         if not is_safe: return await message.reply(msg)
         
-        if amount > current_bank:
-            return await message.reply(f"❌ رصيد التداول غير كافٍ. المتاح: {current_bank:,.2f} $")
-
-        # تنفيذ العملية: خصم من البنك وإضافة للمحفظة
+        if amount > bank_bal: return await message.reply("❌ رصيد البنك غير كافٍ.")
         supabase.table("users_global_profile").update({
-            "bank_balance": current_bank - amount,
-            "wallet": current_wallet + amount
+            "bank_balance": bank_bal - amount, 
+            "wallet": wallet_bal + amount
         }).eq("user_id", user_id).execute()
 
     del trade_sessions[key]
     await message.reply(f"✅ تم تحويل <b>{amount:,.2f} $</b> بنجاح!", parse_mode="HTML")
-    # تحديث واجهة المحفظة بعد التحويل
-    await process_wallet_logic(user_id, message.from_user.first_name, message=message)
+    await process_wallet_logic(user_id, message.from_user.first_name, message=message)    
 
 # --- قسم القروض ---
 
@@ -915,40 +903,47 @@ async def repay_loan_handler(callback_query: types.CallbackQuery):
     user_id = int(callback_query.data.split(':')[1])
     user_data = await get_user_data(user_id)
     
-    debt = float(user_data.get('debt_balance', 0))
-    bank_bal = float(user_data.get('bank_balance', 0))
+    bank_bal = float(user_data.get('bank_balance', 0) or 0)
+    debt = float(user_data.get('debt_balance', 0) or 0)
     
     if bank_bal < debt:
-        return await callback_query.answer(f"❌ رصيد تداولك ({bank_bal:,.2f}$) أقل من الدين المستحق!", show_alert=True)
+        return await callback_query.answer(f"❌ رصيد تداولك ({bank_bal:,.2f}$) لا يكفي لسداد الدين ({debt:,.2f}$)", show_alert=True)
     
-    # سداد الدين
+    # تحديث قاعدة البيانات
     supabase.table("users_global_profile").update({
         "bank_balance": bank_bal - debt,
         "debt_balance": 0
     }).eq("user_id", user_id).execute()
     
-    await callback_query.answer("✅ تم سداد القرض بنجاح! تم فك حجز السحوبات.", show_alert=True)
+    await callback_query.answer("✅ تم سداد القرض بالكامل!", show_alert=True)
     await process_wallet_logic(user_id, callback_query.from_user.first_name, callback=callback_query)
-
+    
 @dp.callback_query_handler(Text(startswith='exec_loan:'), state="*")
 async def exec_loan_handler(callback_query: types.CallbackQuery):
-    data = callback_query.data.split(':')
-    user_id = int(data[1])
-    loan_amount = float(data[2])
-    
-    user_data = await get_user_data(user_id)
-    new_bank = float(user_data.get('bank_balance', 0)) + loan_amount
-    new_debt = float(user_data.get('debt_balance', 0)) + loan_amount
-
-    supabase.table("users_global_profile").update({
-        "bank_balance": new_bank,
-        "debt_balance": new_debt
-    }).eq("user_id", user_id).execute()
-    
-    await callback_query.answer(f"✅ تم إيداع {loan_amount:,.2f} $ كقرض.", show_alert=True)
-    await process_wallet_logic(user_id, callback_query.from_user.first_name, callback=callback_query)
-    
+    try:
+        data = callback_query.data.split(':')
+        user_id = int(data[1])
+        loan_amount = float(data[2])
         
+        user_data = await get_user_data(user_id)
+        # التأكد من تحويل القيم إلى أرقام لتجنب 22P02
+        current_bank = float(user_data.get('bank_balance', 0) or 0)
+        current_debt = float(user_data.get('debt_balance', 0) or 0)
+
+        # تنفيذ التحديث (حذفنا last_loan_date مؤقتاً لتجنب خطأ النوع)
+        supabase.table("users_global_profile").update({
+            "bank_balance": current_bank + loan_amount,
+            "debt_balance": current_debt + loan_amount
+        }).eq("user_id", user_id).execute()
+        
+        await callback_query.answer(f"✅ تم إيداع {loan_amount:,.2f} $ كقرض بنجاح.", show_alert=True)
+        # تحديث واجهة المحفظة
+        await process_wallet_logic(user_id, callback_query.from_user.first_name, callback=callback_query)
+        
+    except Exception as e:
+        logging.error(f"❌ Loan Exec Error: {e}")
+        await callback_query.answer("❌ فشل في معالجة القرض بقاعدة البيانات.", show_alert=True)
+
         # ==========================================
 # 5. نهاية الملف: نظام الإنعاش الأبدي 24/7 (النبض الذاتي) ⚡
 # ==========================================
