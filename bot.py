@@ -152,15 +152,6 @@ async def trade_reaper():
         await asyncio.sleep(600) # فحص كل 30 ثانية
         
         
-def calculate_liquidation(entry_price, leverage, side):
-    """حساب دقيق لسعر التصفية""" [cite: 89]
-    entry = float(entry_price)
-    lev = int(leverage)
-    if side == 'LONG':
-        return entry * (1 - (1.0 / lev)) [cite: 89]
-    else: 
-        return entry * (1 + (1.0 / lev)) [cite: 89]
-
 # ==========================================
 # 1. الدوال الحسابية (Math Core)
 # ==========================================
@@ -303,14 +294,24 @@ def get_market_keyboard(user_id):
     markup.add(InlineKeyboardButton("📋 صفقاتي المفتوحة", callback_data=f"active_trades_view:{user_id}"))
     
     return markup
-    
-# ==========================================
+ # ==========================================
 # 3. قوالب واجهات المستخدم المصححة
 # ==========================================
+async def is_authorized(callback_query: types.CallbackQuery):
+    """🛡️ الحارس الشخصي للتأكد من ملكية الأزرار"""
+    data_parts = callback_query.data.split(':')
+    if len(data_parts) > 1 and data_parts[1].isdigit():
+        owner_id = int(data_parts[1])
+        if callback_query.from_user.id != owner_id:
+            await callback_query.answer("🚫 هذي ليست محفظتك! العب بعيد يا مبعسس 🤫", show_alert=True)
+            return False
+    return True
 
+# ==========================================
+# 3. قوالب واجهات المستخدم
+# ==========================================
 def get_coin_keyboard(user_id, symbol):
     markup = InlineKeyboardMarkup(row_width=2)
-    # تصحيح: إضافة الفاصلة بين الزرين
     markup.row(
         InlineKeyboardButton("🟢 شـراء (LONG)", callback_data=f"setup_trade:{user_id}:{symbol}:LONG"),
         InlineKeyboardButton("🔴 بـيـع (SHORT)", callback_data=f"setup_trade:{user_id}:{symbol}:SHORT")
@@ -326,7 +327,6 @@ def get_trade_setup_keyboard(user_id):
     side = session['side']
     
     markup = InlineKeyboardMarkup(row_width=2)
-    # تصحيح: إضافة الفاصلة بين الزرين
     markup.row(
         InlineKeyboardButton(f"⚖️ الرافعة: {session['leverage']}x", callback_data=f"trade_cycle:{user_id}:leverage"),
         InlineKeyboardButton(f"💼 النسبة: {session['margin_pct']}%", callback_data=f"trade_cycle:{user_id}:margin")
@@ -337,6 +337,42 @@ def get_trade_setup_keyboard(user_id):
     markup.add(InlineKeyboardButton(confirm_text, callback_data=f"trade_confirm:{user_id}:{sym}"))
     markup.add(InlineKeyboardButton("❌ إلغاء", callback_data=f"coin_view:{user_id}:{sym}"))
     return markup
+
+async def update_trade_ui(callback_query: types.CallbackQuery):
+    user_id = callback_query.from_user.id
+    if user_id not in trade_sessions: return
+    
+    session = trade_sessions[user_id]
+    sym = session['symbol']
+    side = session['side']
+    price = session['entry_price']
+    bal = session['balance']
+    lev = session['leverage']
+    pct = session['margin_pct']
+    
+    margin_amount = bal * (pct / 100.0)
+    total_position = margin_amount * lev
+    quantity = total_position / price if price > 0 else 0
+    liq_price = calculate_liquidation(price, lev, side)
+    
+    side_text = "🟢 شـراء (LONG) 🚀" if side == 'LONG' else "🔴 بـيـع (SHORT) 🩸"
+    
+    text = f"⚙️ | <b>إعـداد صـفـقـة: #{sym}</b>\n"
+    text += f"الـنـوع: {side_text}\n"
+    text += "━━━━━━━━━━━━━━━━━━\n"
+    text += f"💵 سـعـر الـدخول: <code>{price:,.4f} $</code>\n"
+    text += f"🏦 رصـيـدك الـمـتـاح: <code>{bal:,.2f} $</code>\n\n"
+    text += f"⚖️ الـرافـعـة الـمـالـيـة: <b>{lev}x</b>\n"
+    text += f"💼 الـمـبـلـغ الـمـسـتـخـدم: <b>{margin_amount:,.2f} $</b> ({pct}%)\n"
+    text += f"🪙 حـجـم الـعـمـلات: <b>{quantity:,.6f} {sym}</b>\n"
+    text += f"⏳ الـمـدة الـمـحـددة: <b>{DURATION_MAP[session['duration']][0]}</b>\n\n"
+    text += f"⚠️ <b>سـعـر الـتـصـفـيـة الـمـتـوقـع:</b> <code>{liq_price:,.4f} $</code>\n"
+    text += "━━━━━━━━━━━━━━━━━━\n"
+    text += "<i>اضغط على الأزرار لتغيير النسب، ثم قم بالتأكيد.</i>"
+
+    await bot.edit_message_text(text, callback_query.message.chat.id, callback_query.message.message_id, 
+                                reply_markup=get_trade_setup_keyboard(user_id), parse_mode="HTML")
+
 
 def get_wallet_keyboard(user_id, debt):
     markup = InlineKeyboardMarkup(row_width=2)
@@ -485,59 +521,6 @@ async def listener_trades(message: types.Message):
         return await message.answer(text, reply_markup=get_market_keyboard(user_id), parse_mode="HTML")
     
     await message.answer(text, reply_markup=get_trades_keyboard(user_id, trades), parse_mode="HTML")
-# ==========================================
-# 5. دوال مساعدة للواجهات (UI Helpers)
-# ==========================================
-
-async def is_authorized(callback_query: types.CallbackQuery):
-    """
-    🛡️ الحارس الشخصي: يفكك الـ callback_data ويتأكد أن اللي ضغط الزر هو صاحبه.
-    يعمل فقط على أزرار التداول ولا يتدخل في أزرار المسابقات.
-    """
-    data_parts = callback_query.data.split(':')
-    # نفترض أن الآيدي دائماً في الخانة الثانية، مثال: setup_trade:123456:BTC
-    if len(data_parts) > 1 and data_parts[1].isdigit():
-        owner_id = int(data_parts[1])
-        if callback_query.from_user.id != owner_id:
-            await callback_query.answer("🚫 هذي ليست محفظتك! العب بعيد يا مبعسس 🤫", show_alert=True)
-            return False
-    return True
-
-async def update_trade_ui(callback_query: types.CallbackQuery):
-    """دالة مساعدة لتحديث شاشة إعداد الصفقة أثناء دوران الأزرار"""
-    user_id = callback_query.from_user.id
-    if user_id not in trade_sessions: return
-    
-    session = trade_sessions[user_id]
-    sym = session['symbol']
-    side = session['side']
-    price = session['entry_price']
-    bal = session['balance']
-    lev = session['leverage']
-    pct = session['margin_pct']
-    
-    margin_amount = bal * (pct / 100.0)
-    total_position = margin_amount * lev
-    quantity = total_position / price if price > 0 else 0
-    liq_price = calculate_liquidation(price, lev, side)
-    
-    side_text = "🟢 شـراء (LONG) 🚀" if side == 'LONG' else "🔴 بـيـع (SHORT) 🩸"
-    
-    text = f"⚙️ | <b>إعـداد صـفـقـة: #{sym}</b>\n"
-    text += f"الـنـوع: {side_text}\n"
-    text += "━━━━━━━━━━━━━━━━━━\n"
-    text += f"💵 سـعـر الـدخول: <code>{price:,.4f} $</code>\n"
-    text += f"🏦 رصـيـدك الـمـتـاح: <code>{bal:,.2f} $</code>\n\n"
-    text += f"⚖️ الـرافـعـة الـمـالـيـة: <b>{lev}x</b>\n"
-    text += f"💼 الـمـبـلـغ الـمـسـتـخـدم: <b>{margin_amount:,.2f} $</b> ({pct}%)\n"
-    text += f"🪙 حـجـم الـعـمـلات: <b>{quantity:,.6f} {sym}</b>\n"
-    text += f"⏳ الـمـدة الـمـحـددة: <b>{DURATION_MAP[session['duration']][0]}</b>\n\n"
-    text += f"⚠️ <b>سـعـر الـتـصـفـيـة الـمـتـوقـع:</b> <code>{liq_price:,.4f} $</code>\n"
-    text += "━━━━━━━━━━━━━━━━━━\n"
-    text += "<i>اضغط على الأزرار لتغيير النسب، ثم قم بالتأكيد.</i>"
-
-    await bot.edit_message_text(text, callback_query.message.chat.id, callback_query.message.message_id, 
-                                reply_markup=get_trade_setup_keyboard(user_id), parse_mode="HTML")
 
 # ==========================================
 # 6. معالجات الأزرار الأساسية (Secured Callbacks)
