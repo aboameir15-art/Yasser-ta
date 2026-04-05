@@ -221,11 +221,12 @@ async def check_financial_health(user_id, amount, action="WITHDRAW"):
 # ==========================================
 # 3. إدارة الصفقات النشطة (Trade Management)
 # ==========================================
-
 async def get_active_trades_report(user_id):
     """حساب الأرباح والخسائر (PnL) الحالية لكل صفقة مفتوحة"""
-    res = supabase.table("active_trades").select("*").eq("user_id", user_id).eq("is_active", True).execute()
+    # البحث بالـ user_id كـ int
+    res = supabase.table("active_trades").select("*").eq("user_id", int(user_id)).eq("is_active", True).execute()
     trades = res.data
+    
     if not trades:
         return None, "📋 <b>لا توجد صفقات مفتوحة حالياً.</b>"
 
@@ -233,57 +234,83 @@ async def get_active_trades_report(user_id):
     for trade in trades:
         symbol = trade['symbol']
         side = "🟢 LONG" if trade['side'] == 'LONG' else "🔴 SHORT"
-        entry = float(trade['entry_price'])
-        lev = trade['leverage']
-        margin = float(trade['margin'])
+        
+        # تحويل القيم لـ int لتتوافق مع قاعدة بيانات bigint
+        entry = int(trade['entry_price'])
+        lev = int(trade['leverage'])
+        margin = int(trade['margin'])
         
         # جلب سعر العملة الحالي من جدول محاكاة السوق
         coin_res = supabase.table("crypto_market_simulation").select("current_price").eq("symbol", symbol).execute()
-        current_price = float(coin_res.data[0]['current_price']) if coin_res.data else entry
+        
+        if coin_res.data:
+            current_price = int(coin_res.data[0]['current_price'])
+        else:
+            current_price = entry
 
-        # حساب النسبة المئوية للربح/الخسارة بناءً على الرافعة المالية
-        pnl_pct = (current_price - entry) / entry if trade['side'] == 'LONG' else (entry - current_price) / entry
+        # حساب النسبة المئوية للربح/الخسارة (مع حماية من القسمة على صفر)
+        if entry > 0:
+            if trade['side'] == 'LONG':
+                pnl_pct = (current_price - entry) / entry 
+            else: # SHORT
+                pnl_pct = (entry - current_price) / entry
+        else:
+            pnl_pct = 0.0
+            
         pnl_amount = margin * pnl_pct * lev
         pnl_emoji = "💰" if pnl_amount >= 0 else "📉"
 
         report_text += f"<b>#{symbol} | {side} {lev}x</b>\n"
-        report_text += f"• الـدخول: <code>{entry:,.4f}</code> | الآن: <code>{current_price:,.4f}</code>\n"
-        report_text += f"{pnl_emoji} الـربح/الخسارة: <b>{pnl_amount:+.2f} $</b>\n"
+        # نستخدم الفواصل الجمالية (,) لأن الأرقام الآن صحيحة ولا تحتوي على فواصل عشرية
+        report_text += f"• الـدخول: <code>{entry:,} $</code> | الآن: <code>{current_price:,} $</code>\n"
+        report_text += f"{pnl_emoji} الـربح/الخسارة: <b>{int(pnl_amount):+,} $</b>\n"
         report_text += "━━━━━━━━━━━━━━━━━━\n"
         
     return trades, report_text
 
 async def close_trade_manually(trade_id, current_price):
     """إغلاق الصفقة وتصفية الحساب وإرجاع الرصيد للبنك"""
-    res = supabase.table("active_trades").select("*").eq("id", trade_id).execute()
-    if not res.data: return False, "الصفقة غير موجودة."
+    # ⚠️ تصحيح مهم: العمود في جدولك اسمه trade_id وليس id
+    res = supabase.table("active_trades").select("*").eq("trade_id", str(trade_id)).execute()
+    if not res.data: 
+        return False, "⚠️ الصفقة غير موجودة أو تم إغلاقها مسبقاً."
     
     trade = res.data[0]
-    user_id = trade['user_id']
-    entry = float(trade['entry_price'])
-    margin = float(trade['margin'])
+    user_id = int(trade['user_id'])
+    entry = int(trade['entry_price'])
+    margin = int(trade['margin'])
     lev = int(trade['leverage'])
     side = trade['side']
+    current_price = int(current_price) 
     
     # حساب النتيجة النهائية
-    pnl_pct = (current_price - entry) / entry if side == 'LONG' else (entry - current_price) / entry
-    pnl_amount = margin * pnl_pct * lev
-    total_return = margin + pnl_amount # الهامش الأصلي + الربح (أو - الخسارة)
+    if entry > 0:
+        pnl_pct = (current_price - entry) / entry if side == 'LONG' else (entry - current_price) / entry
+    else:
+        pnl_pct = 0.0
+        
+    pnl_amount = int(margin * pnl_pct * lev) # تحويل النتيجة لـ int
+    total_return = margin + pnl_amount 
+    
+    # حماية: لا يمكن للرصيد العائد أن يكون بالسالب (أقصى خسارة هي الهامش)
+    if total_return < 0: 
+        total_return = 0 
     
     # تحديث رصيد البنك
-    user_data = await get_user_data(user_id)
-    new_bank = float(user_data['bank_balance']) + total_return
-    supabase.table("users_global_profile").update({"bank_balance": new_bank}).eq("user_id", user_id).execute()
+    user_res = supabase.table("users_global_profile").select("bank_balance").eq("user_id", user_id).execute()
+    if user_res.data:
+        current_bank = int(user_res.data[0]['bank_balance'])
+        new_bank = current_bank + total_return
+        supabase.table("users_global_profile").update({"bank_balance": new_bank}).eq("user_id", user_id).execute()
     
-    # أرشفة الصفقة (جعلها غير نشطة)
+    # ⚠️ تم إزالة close_price و pnl و closed_at من التحديث، لأنها غير موجودة في هيكل الـ SQL الذي أعطيتني إياه للجدول!
+    # إذا أردت حفظها مستقبلاً، يجب إضافة هذه الأعمدة لجدول active_trades.
     supabase.table("active_trades").update({
-        "is_active": False, 
-        "close_price": current_price, 
-        "pnl": pnl_amount,
-        "closed_at": datetime.now().isoformat()
-    }).eq("id", trade_id).execute()
+        "is_active": False
+    }).eq("trade_id", str(trade_id)).execute()
     
     return True, pnl_amount
+
 # ==========================================
 # 3. قوالب واجهات المستخدم (Secured Keyboards)
 # ==========================================
@@ -520,15 +547,21 @@ async def listener_market(message: types.Message):
             markup.add(InlineKeyboardButton(f"عرض {sym} 🪙", callback_data=f"coin_view:{user_id}:{sym}"))
 
     await message.answer(text, reply_markup=markup, parse_mode="HTML")
-
+# ==========================================
+# معالج رسالة "صفقاتي"
+# ==========================================
 @dp.message_handler(Text(equals=["صفقاتي", "الصفقات"], ignore_case=True))
 async def listener_trades(message: types.Message):
-    user_id = message.from_user.id
+    user_id = int(message.from_user.id)
+    
+    # جلب الصفقات المفتوحة مع النص الجاهز
     trades, text = await get_active_trades_report(user_id)
     
     if not trades:
+        # إذا لم يكن لديه صفقات نعرض له السوق (تأكد أن دالة get_market_keyboard معرفة لديك)
         return await message.answer(text, reply_markup=get_market_keyboard(user_id), parse_mode="HTML")
     
+    # إذا كان لديه صفقات نعرضها له مع أزرار التحكم (تأكد أن دالة get_trades_keyboard معرفة لديك)
     await message.answer(text, reply_markup=get_trades_keyboard(user_id, trades), parse_mode="HTML")
 
 # ==========================================
@@ -593,14 +626,34 @@ async def callback_market_tabs(callback_query: types.CallbackQuery):
 async def callback_view_trades(callback_query: types.CallbackQuery):
     if not await is_authorized(callback_query): return
     
-    user_id = callback_query.from_user.id
-    trades, text = await get_active_trades_report(user_id)
+    # 🟢 إيقاف علامة التحميل المزعجة في الزر فور الضغط عليه
+    await callback_query.answer()
     
-    if not trades:
-        return await callback_query.message.edit_text(text, reply_markup=get_market_keyboard(user_id), parse_mode="HTML")
+    user_id = int(callback_query.from_user.id) # تأكيد الـ int كالعادة 🛡️
+    
+    try:
+        # جلب البيانات من الدالة التي عدلناها سابقاً
+        trades, text = await get_active_trades_report(user_id)
         
-    await callback_query.message.edit_text(text, reply_markup=get_trades_keyboard(user_id, trades), parse_mode="HTML")
-
+        if not trades:
+            # إذا لم تكن هناك صفقات، يرجع به إلى لوحة السوق
+            return await callback_query.message.edit_text(
+                text, 
+                reply_markup=get_market_keyboard(user_id), 
+                parse_mode="HTML"
+            )
+            
+        # إذا كان لديه صفقات، يعرضها مع أزرار التحكم بها
+        await callback_query.message.edit_text(
+            text, 
+            reply_markup=get_trades_keyboard(user_id, trades), 
+            parse_mode="HTML"
+        )
+        
+    except Exception as e:
+        logging.error(f"Error loading trades view: {e}")
+        await callback_query.answer("❌ تعذر جلب الصفقات حالياً.", show_alert=True)
+        
 @dp.callback_query_handler(Text(startswith='coin_view:'))
 async def process_coin_view(callback_query: types.CallbackQuery):
     if not await is_authorized(callback_query): return
