@@ -707,56 +707,72 @@ async def process_trade_confirm(callback_query: types.CallbackQuery):
     session = trade_sessions[user_id]
     margin_amount = session['balance'] * (session['margin_pct'] / 100.0)
     
+    # التحقق من الرصيد
     if margin_amount <= 0 or margin_amount > session['balance']:
         return await callback_query.answer("❌ رصيدك غير كافٍ لهذه العملية!", show_alert=True)
         
     try:
+        # جلب السعر الحالي من السوق للتأكد من دقة الدخول
         coin_data = supabase.table("crypto_market_simulation").select("current_price").eq("symbol", session['symbol']).execute()
+        if not coin_data.data:
+            return await callback_query.answer("⚠️ العملة غير متوفرة حالياً.", show_alert=True)
+            
         current_price = float(coin_data.data[0]['current_price'])
         
+        # حساب الكمية وسعر التصفية ووقت الانتهاء
         quantity = (margin_amount * session['leverage']) / current_price
         liq_price = calculate_liquidation(current_price, session['leverage'], session['side'])
         expiry = datetime.now() + DURATION_MAP[session['duration']][1]
         
         new_balance = session['balance'] - margin_amount
         
-        # 1. سحب المبلغ من المستخدم
-        supabase.table("users_global_profile").update({"bank_balance": new_balance}).eq("user_id", user_id).execute()
+        # 1. تحديث رصيد المستخدم في قاعدة البيانات (تحويل المعرف إلى int لضمان التوافق)
+        supabase.table("users_global_profile").update({
+            "bank_balance": float(new_balance)
+        }).eq("user_id", int(user_id)).execute()
         
-        # 2. فتح الصفقة في الجدول
-        supabase.table("active_trades").insert({
-            "user_id": user_id,
-            "symbol": session['symbol'],
-            "side": session['side'],
-            "entry_price": current_price,
-            "leverage": session['leverage'],
-            "margin": margin_amount,
-            "quantity": quantity,
-            "liquidation_price": liq_price,
-            "expiry_time": expiry.isoformat(),
+        # 2. إدخال الصفقة في جدول active_trades مع ضمان أنواع البيانات
+        trade_data = {
+            "user_id": int(user_id),              # ضمان أنه BigInt
+            "symbol": str(session['symbol']),      # Text
+            "side": str(session['side']),          # Text (LONG/SHORT)
+            "entry_price": float(current_price),   # Numeric
+            "leverage": int(session['leverage']),  # Integer
+            "margin": float(margin_amount),        # Numeric
+            "quantity": float(quantity),           # Numeric
+            "liquidation_price": float(liq_price), # Numeric
+            "expiry_time": expiry.isoformat(),     # Timestamp
             "is_active": True
-        }).execute()
+        }
         
-        # 3. مسح الجلسة بعد التأكيد
+        supabase.table("active_trades").insert(trade_data).execute()
+        
+        # 3. مسح الجلسة المؤقتة بعد نجاح الإدخال
         del trade_sessions[user_id]
         
-        text = "✅ <b>تـم فـتـح الـصـفـقـة بـنـجـاح!</b> 🚀\n\n"
-        text += f"العملة: #{session['symbol']}\n"
-        text += f"النوع: {session['side']}\n"
-        text += f"سعر الدخول: {current_price:,.4f} $\n"
-        text += f"المبلغ المحجوز: {margin_amount:,.2f} $\n"
-        text += f"رصيدك المتبقي: {new_balance:,.2f} $"
+        # صياغة رسالة النجاح
+        text = "✅ <b>تـم فـتـح الـصـفـقـة بـنـجـاح!</b> 🚀\n"
+        text += "━━━━━━━━━━━━━━━━━━\n"
+        text += f"🪙 الـعـمـلـة: <b>#{session['symbol']}</b>\n"
+        text += f"⚖️ الـنـوع: <b>{session['side']}</b>\n"
+        text += f"💵 سـعـر الـدخول: <code>{current_price:,.4f} $</code>\n"
+        text += f"💼 الـهـامـش (Margin): <b>{margin_amount:,.2f} $</b>\n"
+        text += f"⏳ تـنـتـهـي بـعـد: <b>{DURATION_MAP[session['duration']][0]}</b>\n"
+        text += "━━━━━━━━━━━━━━━━━━\n"
+        text += f"💰 رصـيـدك الـحـالي: <code>{new_balance:,.2f} $</code>"
         
-        markup = InlineKeyboardMarkup()
-        markup.add(InlineKeyboardButton("📋 عرض صفقاتي", callback_data=f"active_trades_view:{user_id}"))
-        markup.add(InlineKeyboardButton("🔙 العودة للسوق", callback_data=f"market_tab:{user_id}:trending"))
+        markup = InlineKeyboardMarkup(row_width=1)
+        markup.add(
+            InlineKeyboardButton("📋 عرض صفقاتي المفتوحة", callback_data=f"active_trades_view:{user_id}"),
+            InlineKeyboardButton("🔙 العودة للسوق", callback_data=f"market_tab:{user_id}:trending")
+        )
         
         await callback_query.message.edit_text(text, reply_markup=markup, parse_mode="HTML")
           
     except Exception as e:
         logging.error(f"Trade Insert Error: {e}")
-        await callback_query.answer("❌ حدث خطأ داخلي أثناء تنفيذ الصفقة.", show_alert=True)
-
+        # ملاحظة: في بيئة الإنتاج يفضل إضافة كود لاستعادة الرصيد إذا فشل إدخال الصفقة
+        await callback_query.answer("❌ فشل تنفيذ الصفقة. تأكد من إعدادات الجدول.", show_alert=True)
 # ==========================================
 # 8. إدارة الصفقات المفتوحة (DCA & Close)
 # ==========================================
