@@ -435,33 +435,31 @@ def get_wallet_keyboard(user_id, debt):
     return markup
 
 def get_trades_keyboard(user_id, trades):
-    markup = InlineKeyboardMarkup(row_width=1) # يفضل عرض الصفقات عمودياً لسهولة التحكم
+    markup = InlineKeyboardMarkup(row_width=1) 
     for trade in trades:
-        # التعديل هنا: استخدام trade_id بدلاً من id
-        t_id = trade['trade_id'] 
-        symbol = trade['symbol']
-        # إضافة أزرار كل صفقة في صف واحد (Row)
+        # 1. استخراج المعرف بشكل صحيح (تأكد من الاسم trade_id)
+        t_id = trade.get('trade_id')
+        symbol = trade.get('symbol', 'COIN')
+        
+        # 2. تحويل المعرف لنص str لضمان إرساله في الـ callback_data بدون مشاكل
+        t_id_str = str(t_id)
+        u_id_str = str(user_id)
+
+        # 3. التصحيح: استخدام t_id_str بدلاً من trade_id الذي كان يسبب انهيار الكود
         markup.row(
-            InlineKeyboardButton(f"🚀 تعزيز {symbol}", callback_data=f"dca_trade:{user_id}:{trade_id}"),
-            InlineKeyboardButton(f"❌ إغلاق", callback_data=f"close_trade:{user_id}:{trade_id}")
+            InlineKeyboardButton(f"🚀 تعزيز {symbol}", callback_data=f"dca_trade:{u_id_str}:{t_id_str}"),
+            InlineKeyboardButton(f"❌ إغلاق", callback_data=f"close_trade:{u_id_str}:{t_id_str}")
         )
+        
     markup.add(InlineKeyboardButton("🔙 العودة للسوق", callback_data=f"market_tab:{user_id}:trending"))
     return markup
-
+    
 class BankTransfer(StatesGroup):
     waiting_for_amount = State()      # انتظار مبلغ التحويل/الإيداع
     waiting_for_account = State()     # انتظار رقم الحساب (في حال التحويل لشخص)
 # ==========================================
 # 4. مستمعات المحفظة (متوافق مع Trade_ID)
 # ==========================================
-
-@dp.callback_query_handler(lambda c: c.data and c.data.startswith('wallet_view:'), state="*")
-async def callback_wallet_view(callback_query: types.CallbackQuery):
-    user_id = int(callback_query.data.split(':')[1])
-    if callback_query.from_user.id != user_id:
-        return await callback_query.answer("❌ هذه المحفظة ليست لك!", show_alert=True)
-    await process_wallet_logic(user_id, callback_query.from_user.first_name, callback=callback_query)
-
 @dp.message_handler(Text(equals=["محفظتي", "المحفظة"], ignore_case=True), state="*")
 async def message_wallet_view(message: types.Message):
     await process_wallet_logic(message.from_user.id, message.from_user.first_name, message=message)
@@ -548,26 +546,34 @@ async def listener_market(message: types.Message):
             markup.add(InlineKeyboardButton(f"عرض {sym} 🪙", callback_data=f"coin_view:{user_id}:{sym}"))
 
     await message.answer(text, reply_markup=markup, parse_mode="HTML")
-# ==========================================
-# معالج رسالة "صفقاتي"
-# ==========================================
-@dp.message_handler(Text(equals=["صفقاتي", "الصفقات"], ignore_case=True))
+# --- 2. المستمع (الذي لا يستجيب) ---
+@dp.message_handler(Text(equals=["صفقاتي", "الصفقات"], ignore_case=True), state="*")
 async def listener_trades(message: types.Message):
     user_id = int(message.from_user.id)
-    
-    # جلب الصفقات المفتوحة مع النص الجاهز
-    trades, text = await get_active_trades_report(user_id)
-    
-    if not trades:
-        # إذا لم يكن لديه صفقات نعرض له السوق (تأكد أن دالة get_market_keyboard معرفة لديك)
-        return await message.answer(text, reply_markup=get_market_keyboard(user_id), parse_mode="HTML")
-    
-    # إذا كان لديه صفقات نعرضها له مع أزرار التحكم (تأكد أن دالة get_trades_keyboard معرفة لديك)
-    await message.answer(text, reply_markup=get_trades_keyboard(user_id, trades), parse_mode="HTML")
+    try:
+        trades, text = await get_active_trades_report(user_id)
+        
+        if not trades:
+            # تأكد أن دالة get_market_keyboard لا تحتوي على أخطاء أيضاً
+            return await message.answer(text, reply_markup=get_market_keyboard(user_id), parse_mode="HTML")
+        
+        # استدعاء الكيبورد المصحح
+        await message.answer(text, reply_markup=get_trades_keyboard(user_id, trades), parse_mode="HTML")
+    except Exception as e:
+        logging.error(f"Listener Error: {e}")
+        await message.answer(f"⚠️ عذراً، حدث خطأ أثناء جلب صفقاتك: {e}")
 
 # ==========================================
 # 6. معالجات الأزرار الأساسية (Secured Callbacks)
 # ==========================================
+@dp.callback_query_handler(lambda c: c.data and c.data.startswith('wallet_view:'), state="*")
+async def callback_wallet_view(callback_query: types.CallbackQuery):
+    user_id = int(callback_query.data.split(':')[1])
+    if callback_query.from_user.id != user_id:
+        return await callback_query.answer("❌ هذه المحفظة ليست لك!", show_alert=True)
+    await process_wallet_logic(user_id, callback_query.from_user.first_name, callback=callback_query)
+
+
 @dp.callback_query_handler(Text(startswith='market_tab:'), state="*")
 async def callback_market_tabs(callback_query: types.CallbackQuery):
     if not await is_authorized(callback_query): return
@@ -580,7 +586,7 @@ async def callback_market_tabs(callback_query: types.CallbackQuery):
         # الآن نستخدم قوة SQL للترتيب مباشرة بفضل العمود الجديد change_24h
         if tab_type == 'gainers':
             # جلب أعلى 5 عملات من حيث نسبة الربح
-            res = supabase.table("crypto_market_simulation").select("*").order("change_24h", desc=True).limit(15).execute()
+            res = supabase.table("crypto_market_simulation").select("*").order("change_24h", desc=True).limit(20).execute()
             header = "📈 <b>الأعلى ربحاً (24h):</b>"
         elif tab_type == 'losers':
             # جلب أكثر 5 عملات خسارة (من الأصغر للأكبر)
@@ -623,15 +629,14 @@ async def callback_market_tabs(callback_query: types.CallbackQuery):
         logging.error(f"Error in market_tab: {e}")
         await callback_query.answer("⚠️ فشل تحديث بيانات السوق.", show_alert=True)
 
-@dp.callback_query_handler(Text(startswith='active_trades_view:'))
+# --- 3. الكولباك (الذي لا يستجيب للضغط) ---
+@dp.callback_query_handler(Text(startswith='active_trades_view:'), state="*")
 async def callback_view_trades(callback_query: types.CallbackQuery):
-    if not await is_authorized(callback_query): return
-    
+    # إيقاف التحميل فوراً
     await callback_query.answer()
-    user_id = int(callback_query.from_user.id)
     
+    user_id = int(callback_query.from_user.id)
     try:
-        # جلب الصفقات المفتوحة
         trades, text = await get_active_trades_report(user_id)
         
         if not trades:
@@ -641,19 +646,15 @@ async def callback_view_trades(callback_query: types.CallbackQuery):
                 parse_mode="HTML"
             )
             
-        # ⚠️ تأكد أن دالة get_trades_keyboard تستخدم trade['trade_id'] وليس trade['id']
         await callback_query.message.edit_text(
             text, 
             reply_markup=get_trades_keyboard(user_id, trades), 
             parse_mode="HTML"
         )
-        
     except Exception as e:
-        # إذا ظهر خطأ 'id' هنا مرة أخرى، فهذا يعني أن المشكلة في دالة get_trades_keyboard
-        logging.error(f"Error loading trades view: {e}")
-        await callback_query.answer(f"❌ خطأ في البرمجة: {e}", show_alert=True)
+        logging.error(f"Callback View Error: {e}")
+        await callback_query.message.answer(f"❌ فشل عرض الصفقات: {e}")
         
-
 @dp.callback_query_handler(Text(startswith='coin_view:'))
 async def process_coin_view(callback_query: types.CallbackQuery):
     if not await is_authorized(callback_query): return
