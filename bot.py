@@ -824,75 +824,96 @@ async def process_trade_confirm(callback_query: types.CallbackQuery):
 # 8. إدارة الصفقات المفتوحة (DCA & Close)
 # ==========================================
 
-@dp.callback_query_handler(Text(startswith='dca_trade:'))
+@dp.callback_query_handler(Text(startswith='dca_trade:'), state="*")
 async def process_dca_trade(callback_query: types.CallbackQuery):
     if not await is_authorized(callback_query): return
     
+    # ⚠️ فك البيانات (user_id و trade_id)
     data = callback_query.data.split(':')
     user_id = int(data[1])
-    trade_id = data[2]
+    t_id = data[2] # هذا هو الـ UUID الخاص بالصفقة
 
-    res = supabase.table("active_trades").select("*").eq("id", trade_id).execute()
-    if not res.data: return await callback_query.answer("⚠️ الصفقة غير موجودة أو مغلقة.")
+    # 1. جلب بيانات الصفقة (استخدام trade_id بدلاً من id)
+    res = supabase.table("active_trades").select("*").eq("trade_id", t_id).execute()
+    if not res.data: 
+        return await callback_query.answer("⚠️ الصفقة غير موجودة أو مغلقة.", show_alert=True)
     
     trade = res.data[0]
     symbol = trade['symbol']
-    old_margin = float(trade['margin'])
-    old_entry = float(trade['entry_price'])
+    # تحويل لـ int للتعامل مع نظام bigint
+    old_margin = int(trade['margin'])
+    old_entry = int(trade['entry_price'])
     side = trade['side']
     leverage = int(trade['leverage'])
 
+    # 2. جلب السعر الحالي (int)
     coin_res = supabase.table("crypto_market_simulation").select("current_price").eq("symbol", symbol).execute()
-    current_price = float(coin_res.data[0]['current_price'])
+    if not coin_res.data:
+        return await callback_query.answer("⚠️ تعذر جلب سعر العملة الحالي.", show_alert=True)
+    current_price = int(coin_res.data[0]['current_price'])
 
-    bank_bal = await get_user_bank_balance(user_id)
+    # 3. التحقق من الرصيد (التعزيز بمقدار الهامش الحالي x1)
+    user_res = supabase.table("users_global_profile").select("bank_balance").eq("user_id", user_id).execute()
+    bank_bal = int(user_res.data[0]['bank_balance']) if user_res.data else 0
     dca_amount = old_margin 
     
     if bank_bal < dca_amount:
-        return await callback_query.answer(f"❌ رصيدك لا يكفي للتعزيز! تحتاج {dca_amount:,.2f} $", show_alert=True)
+        return await callback_query.answer(f"❌ رصيدك لا يكفي! تحتاج {dca_amount:,} $", show_alert=True)
 
+    # 4. حسابات المتوسط الجديد (بما أنها أرقام صحيحة كبيرة، الحساب يبقى دقيقاً)
     new_margin = old_margin + dca_amount
-    old_units = (old_margin * leverage) / old_entry
-    new_units_added = (dca_amount * leverage) / current_price
+    # (الهامش القديم * الرافعة / السعر القديم) + (الهامش الجديد * الرافعة / السعر الحالي)
+    old_units = (old_margin * leverage) / old_entry if old_entry > 0 else 0
+    new_units_added = (dca_amount * leverage) / current_price if current_price > 0 else 0
     total_units = old_units + new_units_added
-    new_entry_price = (new_margin * leverage) / total_units
-    new_liquidation = calculate_liquidation(new_entry_price, leverage, side)
+    
+    # السعر المتوسط الجديد
+    new_entry_price = int((new_margin * leverage) / total_units) if total_units > 0 else old_entry
+    new_liquidation = int(calculate_liquidation(new_entry_price, leverage, side))
 
+    # 5. تحديث قاعدة البيانات (كلها أرقام صحيحة int)
     new_bank_bal = bank_bal - dca_amount
-    supabase.table("users_global_profile").update({"bank_balance": new_bank_bal}).eq("user_id", user_id).execute()
+    supabase.table("users_global_profile").update({"bank_balance": int(new_bank_bal)}).eq("user_id", user_id).execute()
     
     supabase.table("active_trades").update({
-        "margin": new_margin,
-        "entry_price": new_entry_price,
-        "liquidation_price": new_liquidation
-    }).eq("id", trade_id).execute()
+        "margin": int(new_margin),
+        "entry_price": int(new_entry_price),
+        "liquidation_price": int(new_liquidation)
+    }).eq("trade_id", t_id).execute()
 
-    await callback_query.answer(f"🚀 تم تعزيز الصفقة بنجاح!\nالمتوسط الجديد: {new_entry_price:,.4f}", show_alert=True)
+    await callback_query.answer(f"🚀 تم تعزيز الصفقة!\nالمتوسط الجديد: {new_entry_price:,} $", show_alert=True)
+    # تحديث الشاشة للمستخدم بعد التعزيز
     await callback_view_trades(callback_query)
 
-@dp.callback_query_handler(Text(startswith='close_trade:'))
+@dp.callback_query_handler(Text(startswith='close_trade:'), state="*")
 async def handle_manual_close_request(callback_query: types.CallbackQuery):
     if not await is_authorized(callback_query): return
     
     data = callback_query.data.split(':')
     user_id = int(data[1])
-    trade_id = data[2]
+    t_id = data[2]
     
-    res = supabase.table("active_trades").select("symbol").eq("id", trade_id).execute()
-    if not res.data: return await callback_query.answer("⚠️ الصفقة مغلقة.")
+    # 1. جلب رمز العملة (استخدام trade_id)
+    res = supabase.table("active_trades").select("symbol").eq("trade_id", t_id).execute()
+    if not res.data: 
+        return await callback_query.answer("⚠️ الصفقة مغلقة بالفعل.", show_alert=True)
     
     symbol = res.data[0]['symbol']
-    coin_res = supabase.table("crypto_market_simulation").select("current_price").eq("symbol", symbol).execute()
-    current_price = float(coin_res.data[0]['current_price'])
     
-    success, pnl = await close_trade_manually(trade_id, current_price)
+    # 2. جلب السعر الحالي للإغلاق (int)
+    coin_res = supabase.table("crypto_market_simulation").select("current_price").eq("symbol", symbol).execute()
+    current_price = int(coin_res.data[0]['current_price'])
+    
+    # 3. استدعاء دالة الإغلاق التي أصلحناها سابقاً
+    success, pnl = await close_trade_manually(t_id, current_price)
     
     if success:
-        await callback_query.answer(f"✅ تم الإغلاق! الربح/الخسارة: {pnl:+.2f} $", show_alert=True)
+        await callback_query.answer(f"✅ تم الإغلاق بنجاح!\nالربح/الخسارة: {int(pnl):+,} $", show_alert=True)
+        # تحديث الشاشة
         await callback_view_trades(callback_query) 
     else:
-        await callback_query.answer("❌ فشل إغلاق الصفقة.")
-
+        await callback_query.answer("❌ فشل إغلاق الصفقة، حاول مجدداً.", show_alert=True)
+        
 # ==========================================
 # 9. إدارة الأموال والقروض (المطورة)
 # ==========================================
