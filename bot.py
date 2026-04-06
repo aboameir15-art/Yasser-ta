@@ -553,11 +553,11 @@ def get_trades_keyboard(user_id, trades):
         symbol = trade.get('symbol', 'COIN')
         
         # أزرار الصفقة
-        # زر الإغلاق الآن يرسل "pre_close" بدلاً من "close_trade" مباشرة كحماية
+        # زر الإغلاق الآن يرسل "pre_close" بدلاً من "close_trade" مباشرة
         markup.row(
             InlineKeyboardButton(f"⚙️ إعدادات {symbol}", callback_data=f"manage_trade:{t_id_str}"),
-            InlineKeyboardButton(f"❌ إغلاق الصفقة", callback_data=f"conf_cl_100_{u_id}_{t_id}")
-        )
+            InlineKeyboardButton(f"❌ إغلاق الصفقة", callback_data=f"conf_cl_100_:{t_id_str}")
+       )        
         
     markup.add(InlineKeyboardButton("🔙 العودة للسوق", callback_data=f"market_tab:{user_id}:trending"))
     return markup
