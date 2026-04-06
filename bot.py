@@ -958,6 +958,46 @@ async def process_trade_confirm(callback_query: types.CallbackQuery):
 # ==========================================
 # 8. إدارة الصفقات المفتوحة (DCA & Close)
 # ==========================================
+@dp.callback_query_handler(Text(startswith='manage_trade:'), state="*")
+async def callback_manage_trade_handler(callback_query: types.CallbackQuery):
+    """معالج الدخول إلى إعدادات الصفقة المتقدمة"""
+    try:
+        # 1. استخراج معرف الصفقة من البيانات
+        t_id = callback_query.data.split(':')[1]
+        
+        # 2. جلب بيانات الصفقة من سوبابيس
+        res = supabase.table("active_trades").select("*").eq("trade_id", t_id).execute()
+        
+        if not res.data:
+            return await callback_query.answer("⚠️ عذراً، لم يتم العثور على الصفقة أو قد تكون أغلقت.", show_alert=True)
+        
+        trade = res.data[0]
+        symbol = trade['symbol']
+
+        # 3. جلب السعر الحالي للعملة من جدول المحاكاة
+        coin_res = supabase.table("crypto_market_simulation").select("current_price").eq("symbol", symbol).execute()
+        
+        if not coin_res.data:
+            current_price = int(trade['entry_price']) # سعر احتياطي في حال فشل جلب سعر السوق
+        else:
+            current_price = int(coin_res.data[0]['current_price'])
+
+        # 4. توليد النص والكيبورد باستخدام دالتك الاحترافية
+        text, markup = get_trade_settings_view(trade, current_price)
+
+        # 5. تحديث الرسالة الحالية لواجهة الإعدادات
+        await callback_query.message.edit_text(
+            text, 
+            reply_markup=markup, 
+            parse_mode="HTML"
+        )
+        
+        # إشعار سريع للمستخدم (اختياري)
+        await callback_query.answer(f"⚙️ إعدادات {symbol}")
+
+    except Exception as e:
+        logging.error(f"Error in manage_trade handler: {e}")
+        await callback_query.answer("❌ حدث خطأ أثناء فتح الإعدادات.")
 
 @dp.callback_query_handler(Text(startswith='dca_p:'))
 async def handle_dca_by_percent(callback_query: types.CallbackQuery):
