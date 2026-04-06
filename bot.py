@@ -405,7 +405,7 @@ def get_trade_settings_view(trade, current_price, expand_section=None):
         markup.row(*tp_row3)
 
         markup.add(InlineKeyboardButton("🔙 رجوع للإعدادات", callback_data=f"back_ts_{u_id}_{t_id}"))
-        
+        return text, markup
 
 # --- دالة مساعدة للحساب بناءً على الـ ROE ---
 def calc_price(entry, roe_pct, is_tp, side, lev):
