@@ -1128,26 +1128,43 @@ async def callback_manage_trade_handler(callback_query: types.CallbackQuery):
     except Exception as e:
         await callback_query.answer("❌ خطأ في فتح الإعدادات.")
 
-# --- 2. معالج التوسع (ولد الولد - الأكورديون) ---
+# --- 2. معالج التوسع (ولد الولد - الأكورديون) المعدل ليدعم الكسور ---
 @dp.callback_query_handler(Text(startswith='exp_'), state="*")
 async def handle_expansion_protected(callback_query: types.CallbackQuery):
-    data = callback_query.data.split('_') # exp_cl_uid_tid
-    section = data[1]
-    btn_user_id = int(data[2])
-    t_id = data[3]
-    
-    if callback_query.from_user.id != btn_user_id:
-        return await callback_query.answer("⚠️ مبعسس! هذه الأزرار ليست لك. 🚫", show_alert=True)
+    try:
+        # تفكيك: exp _ section _ uid _ tid
+        data = callback_query.data.split('_') 
+        section = data[1]
+        btn_user_id = int(data[2])
+        t_id = data[3]
+        
+        # 🛡️ حماية
+        if callback_query.from_user.id != btn_user_id:
+            return await callback_query.answer("⚠️ مبعسس! هذه الأزرار ليست لك. 🚫", show_alert=True)
 
-    res = supabase.table("active_trades").select("*").eq("trade_id", t_id).execute()
-    trade = res.data[0]
-    coin_res = supabase.table("crypto_market_simulation").select("current_price").eq("symbol", trade['symbol']).execute()
-    current_price = int(coin_res.data[0]['current_price'])
+        # جلب بيانات الصفقة
+        res = supabase.table("active_trades").select("*").eq("trade_id", t_id).execute()
+        if not res.data:
+            return await callback_query.answer("⚠️ الصفقة غير موجودة.")
+        
+        trade = res.data[0]
+        
+        # جلب السعر الحالي
+        coin_res = supabase.table("crypto_market_simulation").select("current_price").eq("symbol", trade['symbol']).execute()
+        
+        # 🟢 التعديل الجوهري: استخدام float بدلاً من int لضمان عدم توقف الكود
+        current_price = float(coin_res.data[0]['current_price']) if coin_res.data else float(trade['entry_price'])
 
-    # توليد الواجهة الفرعية (الأبناء)
-    text, markup = get_trade_settings_view(trade, current_price, expand_section=section)
-    await callback_query.message.edit_text(text, reply_markup=markup, parse_mode="HTML")
-    await callback_query.answer()
+        # توليد الواجهة الفرعية (الأبناء) - نمرر السعر كـ float
+        text, markup = get_trade_settings_view(trade, current_price, expand_section=section)
+        
+        await callback_query.message.edit_text(text, reply_markup=markup, parse_mode="HTML")
+        await callback_query.answer()
+
+    except Exception as e:
+        import logging
+        logging.error(f"Expansion Error: {e}")
+        await callback_query.answer("❌ حدث خطأ داخلي أثناء فتح القائمة.")
 
 # --- 3. معالج التعزيز (DCA) المحمي ---
 @dp.callback_query_handler(Text(startswith='dca_'), state="*")
