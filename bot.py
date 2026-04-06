@@ -261,7 +261,7 @@ async def get_active_trades_report(user_id):
         report_text += f"<b>#{symbol} | {side} {lev}x</b>\n"
         report_text += f"• الـكمية: <code>{quantity:,}</code>\n"
         report_text += f"• سـعر الـدخول: <code>{entry:,}</code>\n"
-        report_text += f"• الـسعر الآن: <code>{current_price:,}</code>\n"
+        report_text += f"• الـسعر الحالي: <code>{current_price:,}</code>\n"
         report_text += f"{pnl_emoji} الـربح/الخسارة: <b>{pnl_amount:+,} $</b>\n"
         
         # إظهار الأهداف فقط إذا كانت موجودة (تحويلها إلى int لتنظيف الفواصل)
@@ -284,7 +284,7 @@ def get_trade_settings_view(trade, current_price, expand_section=None):
     # 📌 الرأس الثابت للشاشة
     text = f"⚙️ <b>لوحة تحكم المركز: #{symbol}</b>\n"
     text += f"━━━━━━━━━━━━━━━━━━\n"
-    text += f"• الـدخول: <code>{entry:,}</code> | الآن: <code>{current_price:,}</code>\n"
+    text += f"• سعر الدخول: <code>{entry:,}</code> | السعر الحالي: <code>{current_price:,}</code>\n"
     text += f"• التصفية: <pre>{liq:,}</pre> ⚠️\n"
     text += f"━━━━━━━━━━━━━━━━━━\n"
 
@@ -678,7 +678,7 @@ async def process_wallet_logic(user_id, first_name, message=None, callback=None)
             f"🏦 | <b>مـركـز إدارة الأمـوال والأصول</b>\n"
             f"   ━━━━━━━━━━━━━━━━━━\n"
             f"👤 الـمـسـتـخدم: <b>{first_name}</b> {flag}\n"
-            f"🏅 الـرتبة: <b>{rank}</b>\n\n"
+            f"🏅 الخبرة: <b>{rank}</b>\n\n"
             f"💳 <b>رصـيد الـمحفظة:</b> <code>{wallet_bal:,} $</code>\n"
             f"📈 <b>حـساب الـتداول:</b> <code>{bank_bal:,} $</code>\n"
             f"   ━━━━━━━━━━━━━━━━━━\n"
@@ -1033,8 +1033,6 @@ async def process_trade_confirm(callback_query: types.CallbackQuery):
         logging.error(f"Trade Insert Error: {e}")
         await callback_query.answer(f"❌ خطأ: تأكد من تحويل الأعمدة لـ bigint", show_alert=True)
         
-
-
 @dp.callback_query_handler(Text(startswith=('pre_risk_sl_', 'pre_risk_tp_')), state="*")
 async def handle_automated_risk_selection(callback_query: types.CallbackQuery):
     try:
@@ -1101,7 +1099,7 @@ async def handle_automated_risk_selection(callback_query: types.CallbackQuery):
     except Exception as e:
         logging.error(f"Error in automated risk selection: {e}")
         await callback_query.answer("⚠️ حدث خطأ أثناء المعالجة.")
-        
+
 # =========================================================
 # 8. إدارة الصفقات المفتوحة (DCA & Close) - النسخة المحصنة
 # =========================================================
