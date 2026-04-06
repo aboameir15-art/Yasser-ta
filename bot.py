@@ -1036,56 +1036,56 @@ async def process_trade_confirm(callback_query: types.CallbackQuery):
 @dp.callback_query_handler(Text(startswith=('pre_risk_sl_', 'pre_risk_tp_')), state="*")
 async def handle_automated_risk_selection(callback_query: types.CallbackQuery):
     try:
-        # 1. تفكيك البيانات: pre_risk_نوع_uid_tid_السعر
         data = callback_query.data.split('_')
-        risk_type = data[2]   # sl أو tp
+        risk_type = data[2]
         btn_user_id = int(data[3])
         trade_id = data[4]
-        target_price = int(data[5]) # السعر المختار من الزر
+        
+        # 🟢 التعديل الجوهري هنا: استخدم float بدلاً من int
+        target_price = float(data[5]) 
 
-        # 🛡️ حماية المبعسسين
         if callback_query.from_user.id != btn_user_id:
             return await callback_query.answer("⚠️ هذه الصلاحية ليست لك! 🚫", show_alert=True)
 
-        # 2. جلب بيانات الصفقة
         res = supabase.table("active_trades").select("*").eq("trade_id", trade_id).execute()
         if not res.data:
-            return await callback_query.answer("⚠️ الصفقة مغلقة أو غير موجودة.")
+            return await callback_query.answer("⚠️ الصفقة مغلقة.")
         
         trade = res.data[0]
-        entry = int(trade['entry_price'])
-        liq = int(trade['liquidation_price'])
+        
+        # 🟢 تأكد أيضاً أن الأسعار هنا float لكي لا تفقد الدقة في الحسابات
+        entry = float(trade['entry_price'])
+        liq = float(trade['liquidation_price'])
         side = trade['side']
         lev = int(trade['leverage'])
-        margin = int(trade['margin'])
+        margin = float(trade['margin'])
 
-        # 3. التحقق من سعر التصفية (للـ SL فقط)
+        # التحقق من سعر التصفية
         if risk_type == "sl":
             if side == "LONG" and target_price <= liq:
-                return await callback_query.answer(f"⚠️ السعر {target_price:,} خلف التصفية ({liq:,})!", show_alert=True)
+                return await callback_query.answer(f"⚠️ السعر {target_price} خلف التصفية!", show_alert=True)
             if side == "SHORT" and target_price >= liq:
-                return await callback_query.answer(f"⚠️ السعر {target_price:,} خلف التصفية ({liq:,})!", show_alert=True)
+                return await callback_query.answer(f"⚠️ السعر {target_price} خلف التصفية!", show_alert=True)
 
-        # 4. الحسابات المالية (الربح والخسارة المتوقعة)
+        # حسابات PNL
         diff = (target_price - entry) if side == "LONG" else (entry - target_price)
-        # نسبة الربح/الخسارة بناءً على السعر والرافعة
         pnl_pct = (diff / entry) * lev * 100
-        # المبلغ المالي المتوقع (بالدولار)
-        expected_cash = int(margin * (pnl_pct / 100))
+        expected_cash = margin * (pnl_pct / 100)
 
-        # 5. تجهيز نص التأكيد الاحترافي
         label = "إيقاف الخسارة (SL)" if risk_type == "sl" else "جني الأرباح (TP)"
         status_icon = "✅ حماية" if pnl_pct > 0 else "📉 مخاطرة"
         
+        # تنسيق السعر عند العرض: إذا كان كبيراً أظهره صحيحاً، إذا صغيراً أظهره بـ 4 فواصل
+        p_display = f"{target_price:,}" if target_price > 10 else f"{target_price:.4f}"
+
         text = f"⚖️ <b>تأكيد مستهدف {label}</b>\n"
         text += f"━━━━━━━━━━━━━━\n"
-        text += f"• السعر المختار: <code>{target_price:,}</code>\n"
+        text += f"• السعر المختار: <code>{p_display}</code>\n"
         text += f"• الحالة: <b>{status_icon}</b>\n"
         text += f"• النسبة المتوقعة: <b>{pnl_pct:+.2f}%</b>\n"
-        text += f"• الربح/الخسارة: <b>{expected_cash:+,} $</b>\n\n"
+        text += f"• الربح/الخسارة: <b>{expected_cash:+.2f} $</b>\n\n"
         text += "هل تريد اعتماد هذا المستهدف وحفظه؟"
 
-        # 6. أزرار الحفظ النهائي (توجيه لـ conf_sl أو conf_tp)
         save_callback = f"conf_{risk_type}_{btn_user_id}_{trade_id}_{target_price}"
         
         markup = InlineKeyboardMarkup(row_width=1).add(
@@ -1097,9 +1097,9 @@ async def handle_automated_risk_selection(callback_query: types.CallbackQuery):
         await callback_query.answer()
 
     except Exception as e:
-        logging.error(f"Error in automated risk selection: {e}")
-        await callback_query.answer("⚠️ حدث خطأ أثناء المعالجة.")
-
+        logging.error(f"Error in automated risk: {e}")
+        await callback_query.answer("⚠️ خطأ في الحسابات.. تأكد من تنسيق السعر.")
+        
 # =========================================================
 # 8. إدارة الصفقات المفتوحة (DCA & Close) - النسخة المحصنة
 # =========================================================
