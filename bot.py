@@ -556,7 +556,7 @@ def get_trades_keyboard(user_id, trades):
         # زر الإغلاق الآن يرسل "pre_close" بدلاً من "close_trade" مباشرة كحماية
         markup.row(
             InlineKeyboardButton(f"⚙️ إعدادات {symbol}", callback_data=f"manage_trade:{t_id_str}"),
-            InlineKeyboardButton(f"❌ إغلاق الصفقة", callback_data=f"pre_close:{t_id_str}")
+            InlineKeyboardButton(f"❌ إغلاق الصفقة", callback_data=f"conf_cl_100_{u_id}_{t_id}")
         )
         
     markup.add(InlineKeyboardButton("🔙 العودة للسوق", callback_data=f"market_tab:{user_id}:trending"))
@@ -963,9 +963,6 @@ async def process_trade_confirm(callback_query: types.CallbackQuery):
         logging.error(f"Trade Insert Error: {e}")
         await callback_query.answer(f"❌ خطأ: تأكد من تحويل الأعمدة لـ bigint", show_alert=True)
         
-# ==========================================
-# 8. إدارة الصفقات المفتوحة (DCA & Close)
-# ==========================================
 # =========================================================
 # 8. إدارة الصفقات المفتوحة (DCA & Close) - النسخة المحصنة
 # =========================================================
@@ -1091,7 +1088,6 @@ async def handle_partial_protected(callback_query: types.CallbackQuery):
 
 # --- 5. بوابة التأكيد والعودة (Security Gate & Back) ---
 # --- 5. بوابة التأكيد والعودة (Security Gate & Back) ---
-
 @dp.callback_query_handler(Text(startswith='conf_'), state="*")
 async def security_gate_protected(callback_query: types.CallbackQuery):
     # تفكيك: conf_نوع_نسبة_ايدي_صفقة (مثال: conf_cl_100_12345_6789)
@@ -1151,6 +1147,77 @@ async def back_to_settings_protected(callback_query: types.CallbackQuery):
     text, markup = get_trade_settings_view(trade, current_price)
     await callback_query.message.edit_text(text, reply_markup=markup, parse_mode="HTML")
     await callback_query.answer("تم الرجوع")
+    
+# --- معالج الحفظ الفعلي في قاعدة البيانات ---
+@dp.callback_query_handler(Text(startswith='conf_sl_'), state="*")
+async def commit_sl_to_db(callback_query: types.CallbackQuery):
+    # تفكيك: conf_sl_uid_tid_price
+    data = callback_query.data.split('_')
+    btn_user_id = int(data[2])
+    t_id = data[3]
+    new_price = int(data[4])
+
+    # 🛡️ الحماية
+    if callback_query.from_user.id != btn_user_id:
+        return await callback_query.answer("⚠️ مبعسس! 🚫", show_alert=True)
+
+    # 1. التحديث في سوبابيس (جدول active_trades)
+    try:
+        supabase.table("active_trades").update({
+            "stop_loss": new_price
+        }).eq("trade_id", t_id).execute()
+        
+        await callback_query.answer("✅ تم تحديث وقف الخسارة بنجاح!", show_alert=True)
+        
+        # 2. إعادة المستخدم للوحة التحكم الرئيسية للمركز
+        # جلب البيانات المحدثة للعرض
+        res = supabase.table("active_trades").select("*").eq("trade_id", t_id).execute()
+        trade = res.data[0]
+        coin_res = supabase.table("crypto_market_simulation").select("current_price").eq("symbol", trade['symbol']).execute()
+        current_price = int(coin_res.data[0]['current_price'])
+
+        text, markup = get_trade_settings_view(trade, current_price)
+        await callback_query.message.edit_text(text, reply_markup=markup, parse_mode="HTML")
+        
+    except Exception as e:
+        await callback_query.answer("❌ فشل الحفظ في قاعدة البيانات.")
+        
+# --- معالج طلب ضبط الـ SL أو TP (فتح وضع الإدخال) ---
+@dp.callback_query_handler(Text(startswith=('set_sl_', 'set_tp_')), state="*")
+async def start_risk_input(callback_query: types.CallbackQuery, state: FSMContext):
+    data = callback_query.data.split('_') # set_sl_uid_tid
+    action = data[1] # sl أو tp
+    btn_user_id = int(data[2])
+    t_id = data[3]
+
+    # 🛡️ الحماية
+    if callback_query.from_user.id != btn_user_id:
+        return await callback_query.answer("⚠️ لا تتدخل في إعدادات غيرك!", show_alert=True)
+
+    # حفظ البيانات في الحالة (State) لاستخدامها عند استقبال الرسالة النصية
+    await state.update_data(current_trade_id=t_id, target_action=action)
+    
+    label = "وقف الخسارة (SL)" if action == 'sl' else "جني الأرباح (TP)"
+    await state.set_state("waiting_for_risk_price") # حالة انتظار الرقم
+
+    await callback_query.message.answer(f"⌨️ <b>يرجى إرسال سعر {label} الجديد:</b>\n<i>مثال: 0.7450 أو 65000</i>", parse_mode="HTML")
+    await callback_query.answer()
+
+# --- مستمع الرسائل النصية (بعد أن يكتب المستخدم السعر) ---
+@dp.message_handler(state="waiting_for_risk_price")
+async def handle_risk_price_text(message: types.Message, state: FSMContext):
+    user_data = await state.get_data()
+    t_id = user_data['current_trade_id']
+    action = user_data['target_action']
+    
+    # هنا نستدعي الدالة التي صممتها أنت (مع تعديل بسيط لتدعم SL و TP)
+    if action == 'sl':
+        await process_sl_update(message, t_id, message.from_user.id)
+    else:
+        # يمكنك صنع دالة مشابهة لـ TP أو دمجهم
+        await process_tp_update(message, t_id, message.from_user.id)
+    
+    await state.finish() # إنهاء حالة الانتظار
     
 # ==========================================
 # 9. إدارة الأموال والقروض (المطورة)
