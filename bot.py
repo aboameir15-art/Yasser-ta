@@ -333,19 +333,15 @@ def get_trade_settings_view(trade, current_price, expand_section=None):
         entry = float(trade['entry_price'])
         liq = float(trade['liquidation_price'])
         lev = int(trade['leverage'])
-        qty = float(trade.get('quantity', 0)) # الكمية (المقدار)
+        qty = float(trade.get('quantity', 0)) 
         c_price = float(current_price)
         
-        # 💰 حساب الرصيد الصافي (Equity) = الرصيد + الأرباح/الخسائر غير المحققة
-        # ملاحظة: يجب توفير 'net_balance' من قاعدة البيانات أو تمريرها كمتغير
-        net_balance = float(trade.get('net_balance', 100)) # افتراضي 100$ كمثال
+        net_balance = float(trade.get('net_balance', 100)) 
         
         text += f"\n<b>⚙️ نظام إدارة المحفظة (الصافي: {net_balance}$):</b>\n"
         text += f"• الرافعة: {lev}x | الدخول: {entry:,}\n"
 
-        # 🧠 دالة حساب سعر الهدف بناءً على خسارة/ربح مبلغ محدد من الرصيد
         def get_price_by_pnl(amount_to_lose_or_gain, is_profit=False):
-            # المعادلة: التغير في السعر = المبلغ / الكمية
             price_change = amount_to_lose_or_gain / qty if qty > 0 else 0
             if side == "LONG":
                 return entry + price_change if is_profit else entry - price_change
@@ -354,58 +350,51 @@ def get_trade_settings_view(trade, current_price, expand_section=None):
 
         # --- 🛑 نظام وقف الخسارة الديناميكي (SL1 - SL5) ---
         text += "\n<b>🛑 مستويات وقف الخسارة (تأمين الحساب):</b>"
-        sl_buttons = []
         
-        # الحالة 1: السعر رابح (تأمين الصفقة تلقائياً)
         is_in_profit = (side == "LONG" and c_price > entry) or (side == "SHORT" and c_price < entry)
         
         if is_in_profit:
-            # توليد أزرار تأمين (Breakeven & Trailing)
-            # SL1: نقطة الدخول، SL2: ربح بسيط، SL3-5: ملاحقة السعر
+            # تم إضافة (side, lev) لكل استدعاء هنا ليتوقف الخطأ
             targets = [
                 (entry, "دخول 🛡️"),
-                (calc_price(entry, 0.10, True), "تأمين +10%"), # ربح 10% ROE
-                (calc_price(c_price, 0.05, False), "ملاحقة -5%"), # خلف الحالي بـ 5%
-                (calc_price(c_price, 0.15, False), "ملاحقة -15%"),
-                (calc_price(c_price, 0.25, False), "ملاحقة -25%")
+                (calc_price(entry, 0.10, False, side, lev), "تأمين +10%"), 
+                (calc_price(c_price, 0.05, False, side, lev), "ملاحقة -5%"), 
+                (calc_price(c_price, 0.15, False, side, lev), "ملاحقة -15%"),
+                (calc_price(c_price, 0.25, False, side, lev), "ملاحقة -25%")
             ]
         else:
-            # الحالة 2: السعر خاسر أو قريب (تقسيم الرصيد الصافي على 5 مستويات)
-            # كل مستوى يمثل خسارة 20% من رصيدك المخصص للصفقة
             loss_step = net_balance * 0.20 
             targets = []
             for i in range(1, 6):
                 p = get_price_by_pnl(loss_step * i, is_profit=False)
                 targets.append((p, f"SL{i} -{20*i}%"))
 
-        # توزيع أزرار SL
         sl_row1, sl_row2, sl_row3 = [], [], []
         for i, (opt, label) in enumerate(targets):
             opt_val = float(opt)
-            # حماية من التصفية
             if (side == "LONG" and opt_val > liq) or (side == "SHORT" and opt_val < liq) or is_in_profit:
-                formatted_opt = int(opt_val) if opt_val > 10 else round(opt_val, 4)
+                formatted_opt = round(opt_val, 4) if opt_val < 10 else int(opt_val)
                 btn = InlineKeyboardButton(f"{label} ({formatted_opt})", callback_data=f"pre_risk_sl_{u_id}_{t_id}_{formatted_opt}")
                 if len(sl_row1) < 2: sl_row1.append(btn)
                 elif len(sl_row2) < 2: sl_row2.append(btn)
                 else: sl_row3.append(btn)
         
-        markup.row(*sl_row1) if sl_row1 else None
-        markup.row(*sl_row2) if sl_row2 else None
-        markup.row(*sl_row3) if sl_row3 else None
+        if sl_row1: markup.row(*sl_row1)
+        if sl_row2: markup.row(*sl_row2)
+        if sl_row3: markup.row(*sl_row3)
 
-        # --- 💰 نظام جني الأرباح (6 أهداف: 3 متوسطة + 3 بعيدة) ---
+        # --- 💰 نظام جني الأرباح (6 أهداف) ---
         tp_levels = [
-            (0.50, "M1 +50%"), (1.00, "M2 +100%"), (2.00, "M3 +200%"), # متوسطة
-            (5.00, "L1 +500%"), (10.00, "L2 +1000%"), (20.00, "L3 +2000%") # بعيدة
+            (0.50, "M1 +50%"), (1.00, "M2 +100%"), (2.00, "M3 +200%"),
+            (5.00, "L1 +500%"), (10.00, "L2 +1000%"), (20.00, "L3 +2000%")
         ]
 
         text += "\n\n<b>💰 أهداف جني الأرباح (6 مراحل):</b>"
         tp_row1, tp_row2, tp_row3 = [], [], []
         for i, (roe, label) in enumerate(tp_levels):
-            # نستخدم دالة الـ ROE للأهداف لأنها الأكثر دقة في العقود
-            opt = calc_price(entry, roe, True)
-            formatted_opt = int(opt) if opt > 10 else round(opt, 4)
+            # تم إضافة (side, lev) هنا أيضاً
+            opt = calc_price(entry, roe, True, side, lev)
+            formatted_opt = round(opt, 4) if opt < 10 else int(opt)
             btn = InlineKeyboardButton(f"{label} ({formatted_opt})", callback_data=f"pre_risk_tp_{u_id}_{t_id}_{formatted_opt}")
             if i < 2: tp_row1.append(btn)
             elif i < 4: tp_row2.append(btn)
@@ -416,8 +405,7 @@ def get_trade_settings_view(trade, current_price, expand_section=None):
         markup.row(*tp_row3)
 
         markup.add(InlineKeyboardButton("🔙 رجوع للإعدادات", callback_data=f"back_ts_{u_id}_{t_id}"))
-
-    return text, markup
+        
 
 # --- دالة مساعدة للحساب بناءً على الـ ROE ---
 def calc_price(entry, roe_pct, is_tp, side, lev):
