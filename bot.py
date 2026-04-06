@@ -275,68 +275,74 @@ async def get_active_trades_report(user_id):
         
     return trades, report_text
 
-
-def get_trade_settings_view(trade, current_price):
+def get_trade_settings_view(trade, current_price, expand_section=None):
     symbol = trade['symbol']
-    side = trade['side']
     entry = int(trade['entry_price'])
-    lev = int(trade['leverage'])
     liq = int(trade['liquidation_price'])
     t_id = str(trade['trade_id'])
-    u_id = str(trade['user_id'])
+    u_id = str(trade['user_id']) # 🛡️ الآيدي للحماية
     
-    text = f"⚙️ <b>إعدادات المـركز: #{symbol}</b>\n"
+    # 📌 الرأس الثابت للشاشة
+    text = f"⚙️ <b>لوحة تحكم المركز: #{symbol}</b>\n"
     text += f"━━━━━━━━━━━━━━━━━━\n"
     text += f"• الـدخول: <code>{entry:,}</code> | الآن: <code>{current_price:,}</code>\n"
-    text += f"• التصفية: <pre>{liq:,}</pre> ⚠️\n\n"
-    
-    # قسم الإغلاق الجزئي
-    text += "<b>✂️ إغلاق جزئي (من حجم الصفقة):</b>\n"
-    
-    markup = InlineKeyboardMarkup(row_width=5)
-    
-    # صف أزرار الإغلاق الجزئي
-    markup.row(
-        InlineKeyboardButton("10%", callback_data=f"p_close:10:{t_id}"),
-        InlineKeyboardButton("25%", callback_data=f"p_close:25:{t_id}"),
-        InlineKeyboardButton("50%", callback_data=f"p_close:50:{t_id}"),
-        InlineKeyboardButton("100%", callback_data=f"p_close:100:{t_id}")
-    )
-    
-    # قسم تعزيز الصفقة (DCA) من رصيد المحفظة
-    text += "\n<b>🚀 تعزيز (DCA) من رصيد البنك:</b>\n"
-    markup.row(
-        InlineKeyboardButton("10%", callback_data=f"dca_p:10:{t_id}"),
-        InlineKeyboardButton("20%", callback_data=f"dca_p:20:{t_id}"),
-        InlineKeyboardButton("30%", callback_data=f"dca_p:30:{t_id}")
-    )
-    markup.row(
-        InlineKeyboardButton("40%", callback_data=f"dca_p:40:{t_id}"),
-        InlineKeyboardButton("50%", callback_data=f"dca_p:50:{t_id}"),
-        InlineKeyboardButton("100%", callback_data=f"dca_p:100:{t_id}")
-    )
+    text += f"• التصفية: <pre>{liq:,}</pre> ⚠️\n"
+    text += f"━━━━━━━━━━━━━━━━━━\n"
 
-    # أزرار ضبط الأهداف
-    text += "\n<b>🎯 إدارة المخاطر:</b>\n"
-    markup.row(
-        InlineKeyboardButton("🛑 وقف الخسارة (SL)", callback_data=f"set_sl:{t_id}"),
-        InlineKeyboardButton("💰 جني الأرباح (TP)", callback_data=f"set_tp:{t_id}")
-    )
+    markup = InlineKeyboardMarkup(row_width=1)
     
-    # زر الموافقة النهائي والعودة
-    markup.add(InlineKeyboardButton("✅ مـوافـقـة (حفظ الإعدادات)", callback_data=f"confirm_settings:{t_id}"))
-    markup.add(InlineKeyboardButton("🔙 العودة للقائمة", callback_data=f"active_trades_view:{u_id}"))
+    # 🌿 القائمة الرئيسية (الآباء)
+    if not expand_section:
+        markup.add(
+            # exp = expand | cl = close | dca = dca | risk = risk
+            InlineKeyboardButton("✂️ إغلاق جزئي للمركز", callback_data=f"exp_cl_{u_id}_{t_id}"),
+            InlineKeyboardButton("🚀 تعزيز المركز (DCA)", callback_data=f"exp_dca_{u_id}_{t_id}"),
+            InlineKeyboardButton("🎯 أهداف الربح والخسارة", callback_data=f"exp_risk_{u_id}_{t_id}"),
+            InlineKeyboardButton("🔙 العودة للقائمة", callback_data=f"active_trades_view_{u_id}")
+        )
     
+    # 🌿 قائمة أبناء (الإغلاق الجزئي)
+    elif expand_section == "cl":
+        text += "<b>💡 اختر نسبة الإغلاق من حجم العقد:</b>"
+        markup.row(
+            InlineKeyboardButton("10%", callback_data=f"pcl_10_{u_id}_{t_id}"),
+            InlineKeyboardButton("25%", callback_data=f"pcl_25_{u_id}_{t_id}"),
+            InlineKeyboardButton("50%", callback_data=f"pcl_50_{u_id}_{t_id}")
+        )
+        markup.add(InlineKeyboardButton("🛑 إغلاق 100% (تأكيد)", callback_data=f"conf_cl_100_{u_id}_{t_id}"))
+        markup.add(InlineKeyboardButton("🔙 رجوع", callback_data=f"back_ts_{u_id}_{t_id}")) # ts = Trade Settings
+
+    # 🌿 قائمة أبناء (التعزيز DCA)
+    elif expand_section == "dca":
+        text += "<b>🚀 اختر نسبة التعزيز من المحفظة:</b>"
+        markup.row(
+            InlineKeyboardButton("10%", callback_data=f"dca_10_{u_id}_{t_id}"),
+            InlineKeyboardButton("20%", callback_data=f"dca_20_{u_id}_{t_id}"),
+            InlineKeyboardButton("50%", callback_data=f"dca_50_{u_id}_{t_id}")
+        )
+        markup.add(InlineKeyboardButton("🔥 تعزيز 100% (تأكيد)", callback_data=f"conf_dca_100_{u_id}_{t_id}"))
+        markup.add(InlineKeyboardButton("🔙 رجوع", callback_data=f"back_ts_{u_id}_{t_id}"))
+
+    # 🌿 قائمة أبناء (إدارة المخاطر)
+    elif expand_section == "risk":
+        text += "<b>🎯 حدد أهدافك بدقة:</b>"
+        markup.row(
+            InlineKeyboardButton("🛑 وقف الخسارة (SL)", callback_data=f"set_sl_{u_id}_{t_id}"),
+            InlineKeyboardButton("💰 جني الأرباح (TP)", callback_data=f"set_tp_{u_id}_{t_id}")
+        )
+        markup.add(InlineKeyboardButton("🔙 رجوع", callback_data=f"back_ts_{u_id}_{t_id}"))
+
     return text, markup
-    
-# كود افتراضي لمعالجة مدخلات المستخدم (Message Handler)
+
 async def process_sl_update(message: types.Message, trade_id, user_id):
     try:
         new_sl = int(message.text) # السعر الذي كتبه المستخدم
         
         # جلب بيانات الصفقة
         res = supabase.table("active_trades").select("*").eq("trade_id", trade_id).execute()
+        if not res.data: return
         trade = res.data[0]
+        
         entry = int(trade['entry_price'])
         liq = int(trade['liquidation_price'])
         side = trade['side']
@@ -355,22 +361,24 @@ async def process_sl_update(message: types.Message, trade_id, user_id):
         
         status_text = "حماية أرباح ✅" if pnl_pct > 0 else "خسارة متوقعة 📉"
         
-        text = f"<b>تأكيد أمر وقف الخسارة:</b>\n"
+        text = f"<b>تأكيد أمر وقف الخسارة (SL):</b>\n"
         text += f"━━━━━━━━━━━━━━\n"
         text += f"• السعر المستهدف: {new_sl:,}\n"
         text += f"• الحالة: {status_text}\n"
         text += f"• النسبة المئوية: {pnl_pct:+.2f}%\n\n"
-        text += "هل تريد الحفظ؟"
+        text += "هل تريد تأكيد وحفظ الإعدادات؟"
         
-        # إرسال زر التأكيد
-        markup = InlineKeyboardMarkup().add(
-            InlineKeyboardButton("✅ تأكيد الحفظ", callback_data=f"confirm_sl:{trade_id}:{new_sl}"),
-            InlineKeyboardButton("❌ إلغاء", callback_data=f"active_trades_view:{user_id}")
+        # 🛡️ إرسال أزرار التأكيد المشفرة بالـ user_id لمنع المتطفلين
+        markup = InlineKeyboardMarkup(row_width=1).add(
+            InlineKeyboardButton("✅ تأكيد الحفظ", callback_data=f"conf_sl_{user_id}_{trade_id}_{new_sl}"),
+            InlineKeyboardButton("❌ تراجع وإلغاء", callback_data=f"back_ts_{user_id}_{trade_id}") # يرجعه للوحة التحكم
         )
         await message.answer(text, reply_markup=markup, parse_mode="HTML")
 
-    except:
-        await message.answer("❌ يرجى إدخال رقم صحيح (بدون فواصل).")
+    except ValueError:
+        await message.answer("❌ يرجى إدخال أرقام صحيحة فقط (بدون حروف أو فواصل).")
+    except Exception as e:
+        await message.answer("⚠️ حدث خطأ أثناء معالجة الطلب.")
         
 async def close_trade_manually(trade_id, current_price):
     """إغلاق الصفقة وتصفية الحساب وإرجاع الرصيد للبنك"""
