@@ -459,8 +459,8 @@ def get_market_keyboard(user_id):
     
     # إضافة الأزرار الرئيسية في صفوف منفصلة
     markup.add(InlineKeyboardButton("🏦 محفظتي الماليـة", callback_data=f"wallet_view:{user_id}"))
-    markup.add(InlineKeyboardButton("📋 صفقاتي المفتوحة", callback_data=f"active_trades_view_:{user_id}"))
-    
+    markup.add(InlineKeyboardButton("📋 صفقاتي المفتوحة", callback_data=f"active_trades_view_:{u_id}"))
+   
     return markup
  # ==========================================
 # 3. قوالب واجهات المستخدم المصححة
@@ -561,7 +561,7 @@ def get_wallet_keyboard(user_id, debt):
         
     # صف السوق والصفقات
     markup.row(
-        InlineKeyboardButton("📋 صفقاتي", callback_data=f"active_trades_view_:{user_id}"),
+        InlineKeyboardButton("📋 صفقاتي", callback_data=f"active_trades_view_:{u_id}"),
         InlineKeyboardButton("🛒 السوق", callback_data=f"market_tab:{user_id}:trending")
     )
     return markup
@@ -996,7 +996,7 @@ async def process_trade_confirm(callback_query: types.CallbackQuery):
         text += f"رصيدك المتبقي: {int(new_balance):,} $"
         
         markup = InlineKeyboardMarkup()
-        markup.add(InlineKeyboardButton("📋 عرض صفقاتي", callback_data=f"active_trades_view_:{user_id}"))
+        markup.add(InlineKeyboardButton("📋 عرض صفقاتي", callback_data=f"active_trades_view_:{u_id}"))
         markup.add(InlineKeyboardButton("🔙 العودة للسوق", callback_data=f"market_tab:{user_id}:trending"))
         
         await callback_query.message.edit_text(text, reply_markup=markup, parse_mode="HTML")
