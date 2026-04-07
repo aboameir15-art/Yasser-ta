@@ -1696,7 +1696,6 @@ async def main_startup():
 
     # ب) تشغيل محركات التداول في الخلفية
     logging.info("⏳ جاري تشغيل محركات السوق والرادار...")
-    asyncio.create_task(market_engine())
     asyncio.create_task(trade_reaper())
 
     # ج) تشغيل البوت (لإصدار Aiogram 2.x)
