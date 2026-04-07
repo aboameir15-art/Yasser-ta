@@ -300,7 +300,7 @@ def get_trade_settings_view(trade, current_price, expand_section=None):
             InlineKeyboardButton("✂️ إغلاق جزئي لصفقة", callback_data=f"exp_cl_{u_id}_{t_id}"),
             InlineKeyboardButton("🚀 تعزيز الصفقة (DCA)", callback_data=f"exp_dca_{u_id}_{t_id}"),
             InlineKeyboardButton("🎯 أهداف الربح والخسارة", callback_data=f"exp_risk_{u_id}_{t_id}"),
-            InlineKeyboardButton("🔙 العودة للقائمة", callback_data=f"active_trades_view:{user_id}")
+            InlineKeyboardButton("🔙 العودة للقائمة", callback_data=f"active_trades_view:{u_id}")
         )
     
     elif expand_section == "cl":
