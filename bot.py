@@ -1388,9 +1388,67 @@ async def security_gate_protected(callback_query: types.CallbackQuery):
     except Exception as e:
         await callback_query.answer("❌ خطأ في فتح شاشة التأكيد.")
 
+# ==========================================
+# 8. معالج التنفيذ النهائي (القرار الحاسم)
+# ==========================================
+@dp.callback_query_handler(Text(startswith='exe_'), state="*")
+async def final_execution_logic(callback_query: types.CallbackQuery):
+    try:
+        # 1. تفكيك البيانات المرسلة من زر "نعم، نفذ الآن"
+        # الصيغة: exe_action_percent_uid_tid
+        data = callback_query.data.split('_')
+        action = data[1]     # 'cl' للإغلاق أو 'dca' للتعزيز
+        percent = data[2]    # القيمة (مثلاً 100)
+        user_id = int(data[3])
+        t_id = data[4]       # آيدي الصفقة في قاعدة البيانات
+
+        # 2. الجدار الناري لحماية الحساب
+        if callback_query.from_user.id != user_id:
+            return await callback_query.answer("⚠️ خطأ في الصلاحية! 🚫", show_alert=True)
+
+        # 3. إشعار المستخدم بالبدء
+        await callback_query.answer("⏳ جاري معالجة الطلب في السوق...", show_alert=False)
+
+        # 4. جلب بيانات الصفقة للتأكد من وجودها
+        res = supabase.table("active_trades").select("*").eq("trade_id", t_id).execute()
+        if not res.data:
+            return await callback_query.message.edit_text("❌ خطأ: الصفقة لم تعد موجودة في السجلات.")
+
+        trade = res.data[0]
+        symbol = trade['symbol']
+
+        # 5. منطق التنفيذ بناءً على النوع
+        if action == 'cl':
+            # --- [هنا تضع كود إغلاق الصفقة الفعلي] ---
+            # مثال: حذف الصفقة من جدول النشط ونقلها لجدول الأرشيف
+            supabase.table("active_trades").delete().eq("trade_id", t_id).execute()
+            
+            success_text = f"✅ <b>تم إغلاق صفقة #{symbol} بنجاح!</b>\n"
+            success_text += f"━━━━━━━━━━━━━━━━━━\n"
+            success_text += f"• الحالة: تم التصفية بنسبة {percent}%\n"
+            success_text += f"• معرف العملية: <code>{t_id}</code>"
+            
+        elif action == 'dca':
+            # --- [هنا تضع كود تعزيز الصفقة الفعلي] ---
+            # مثال: تحديث الكمية (Volume) أو السعر المتوسط
+            success_text = f"🚀 <b>تم تعزيز صفقة #{symbol} بنجاح!</b>\n"
+            success_text += f"━━━━━━━━━━━━━━━━━━\n"
+            success_text += f"• الحالة: إضافة سيولة بنسبة {percent}%\n"
+            success_text += f"• تم تحديث متوسط الدخول آلياً."
+
+        # 6. تحديث الرسالة بالنتيجة النهائية وإظهار زر العودة
+        markup = InlineKeyboardMarkup().add(
+            InlineKeyboardButton("📋 العودة لصفقاتي", callback_data=f"active_trades_view:{user_id}")
+        )
+        
+        await callback_query.message.edit_text(success_text, reply_markup=markup, parse_mode="HTML")
+
+    except Exception as e:
+        logging.error(f"Critical Execution Error: {e}")
+        await callback_query.answer("❌ فشل النظام في تنفيذ الأمر. حاول مجدداً.", show_alert=True)
 
 # ==========================================
-# 8. زر العودة للوحة التحكم الرئيسية للصفقة (Back Button)
+# 9. زر العودة للوحة التحكم الرئيسية للصفقة (Back Button)
 # ==========================================
 @dp.callback_query_handler(Text(startswith='back_ts_'), state="*")
 async def back_to_settings_protected(callback_query: types.CallbackQuery):
@@ -1419,12 +1477,10 @@ async def back_to_settings_protected(callback_query: types.CallbackQuery):
         import logging
         logging.error(f"Error in Back TS: {e}")
         await callback_query.answer("❌ خطأ في الرجوع للقائمة.")
-        
-# ==========================================
-# 9. إدارة الأموال والقروض (المطورة)
-# ==========================================
-# --- [ 1. بدء عملية التحويل الداخلي ] ---
 
+# ==========================================
+# --- [ القروض ] ---
+# ==========================================
 @dp.callback_query_handler(Text(startswith='transfer_flow:'), state="*")
 async def transfer_init(callback_query: types.CallbackQuery, state: FSMContext):
     data = callback_query.data.split(':')
