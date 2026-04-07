@@ -77,40 +77,34 @@ DURATION_MAP = {
 DURATION_KEYS = list(DURATION_MAP.keys())
 
 # ==========================================
-# 2. الدوال المالية والحسابية الأساسية (Core Logic)
+# --- [ حساب التعزيز و الاغلاق ] ---
 # ==========================================
-async def market_engine():
-    """محرك تحديث الأسعار والمؤشرات تلقائياً كل دقيقة"""
-    while True:
-        try:
-            # جلب كل العملات من الجدول
-            res = supabase.table("crypto_market_simulation").select("*").execute()
-            for coin in res.data:
-                symbol = coin['symbol']
-                old_price = float(coin['current_price'])
-                
-                # محاكاة حركة عشوائية (بين -2% و +2%)
-                change_pct = random.uniform(-0.02, 0.02)
-                new_price = old_price * (1 + change_pct)
-                
-                # تحديث بسيط للمؤشرات الفنية (محاكاة)
-                new_rsi = max(10, min(90, float(coin.get('rsi_val', 50)) + random.uniform(-5, 5)))
-                new_ema = (new_price * 0.1) + (float(coin.get('ema_50', new_price)) * 0.9)
-                
-                # تحديث قاعدة البيانات
-                supabase.table("crypto_market_simulation").update({
-                    "current_price": new_price,
-                    "change_24h": ((new_price - float(coin['open_price_24h'])) / float(coin['open_price_24h'])) * 100,
-                    "rsi_val": new_rsi,
-                    "ema_50": new_ema,
-                    "last_tick_direction": "UP" if change_pct > 0 else "DOWN"
-                }).eq("symbol", symbol).execute()
-                
-            logging.info("✅ تم تحديث نبض السوق بنجاح.")
-        except Exception as e:
-            logging.error(f"❌ خطأ في محرك السوق: {e}")
-            
-        await asyncio.sleep(600) # تحديث كل دقيقة
+async def get_total_available_balance(user_id):
+    # 1. جلب الرصيد الحر من المحفظة
+    user_res = supabase.table("users_global_profile").select("bank_balance").eq("user_id", user_id).execute()
+    free_bank = float(user_res.data[0]['bank_balance'])
+    
+    # 2. جلب جميع الصفقات النشطة لحساب الربح/الخسارة العائم
+    trades_res = supabase.table("active_trades").select("*").eq("user_id", user_id).execute()
+    if not trades_res.data:
+        return free_bank
+        
+    total_unrealized_pnl = 0
+    # يمكن دمج جلب الأسعار هنا، لكن للتبسيط نفترض جلب السعر الحالي لكل عملة
+    for t in trades_res.data:
+        coin_res = supabase.table("crypto_market_simulation").select("current_price").eq("symbol", t['symbol']).execute()
+        cp = float(coin_res.data[0]['current_price']) if coin_res.data else float(t['entry_price'])
+        ep = float(t['entry_price'])
+        margin = float(t['margin'])
+        lev = int(t['leverage'])
+        side = t['side']
+        
+        pnl_pct = (cp - ep) / ep if side == 'LONG' else (ep - cp) / ep
+        pnl = margin * pnl_pct * lev
+        total_unrealized_pnl += pnl
+        
+    return max(0, free_bank + total_unrealized_pnl)
+
 
 async def trade_reaper():
     """رادار لمراقبة تصفية الصفقات وانتهاء الوقت"""
@@ -1006,78 +1000,9 @@ async def process_trade_confirm(callback_query: types.CallbackQuery):
         logging.error(f"Trade Insert Error: {e}")
         await callback_query.answer(f"❌ خطأ: تأكد من تحويل الأعمدة لـ bigint", show_alert=True)
         
-@dp.callback_query_handler(Text(startswith=('pre_risk_sl_', 'pre_risk_tp_')), state="*")
-async def handle_automated_risk_selection(callback_query: types.CallbackQuery):
-    try:
-        data = callback_query.data.split('_')
-        risk_type = data[2]
-        btn_user_id = int(data[3])
-        trade_id = data[4]
-        
-        # 🟢 التعديل الجوهري هنا: استخدم float بدلاً من int
-        target_price = float(data[5]) 
-
-        if callback_query.from_user.id != btn_user_id:
-            return await callback_query.answer("⚠️ هذه الصلاحية ليست لك! 🚫", show_alert=True)
-
-        res = supabase.table("active_trades").select("*").eq("trade_id", trade_id).execute()
-        if not res.data:
-            return await callback_query.answer("⚠️ الصفقة مغلقة.")
-        
-        trade = res.data[0]
-        
-        # 🟢 تأكد أيضاً أن الأسعار هنا float لكي لا تفقد الدقة في الحسابات
-        entry = float(trade['entry_price'])
-        liq = float(trade['liquidation_price'])
-        side = trade['side']
-        lev = int(trade['leverage'])
-        margin = float(trade['margin'])
-
-        # التحقق من سعر التصفية
-        if risk_type == "sl":
-            if side == "LONG" and target_price <= liq:
-                return await callback_query.answer(f"⚠️ السعر {target_price} خلف التصفية!", show_alert=True)
-            if side == "SHORT" and target_price >= liq:
-                return await callback_query.answer(f"⚠️ السعر {target_price} خلف التصفية!", show_alert=True)
-
-        # حسابات PNL
-        diff = (target_price - entry) if side == "LONG" else (entry - target_price)
-        pnl_pct = (diff / entry) * lev * 100
-        expected_cash = margin * (pnl_pct / 100)
-
-        label = "إيقاف الخسارة (SL)" if risk_type == "sl" else "جني الأرباح (TP)"
-        status_icon = "✅ حماية" if pnl_pct > 0 else "📉 مخاطرة"
-        
-        # تنسيق السعر عند العرض: إذا كان كبيراً أظهره صحيحاً، إذا صغيراً أظهره بـ 4 فواصل
-        p_display = f"{target_price:,}" if target_price > 10 else f"{target_price:.4f}"
-
-        text = f"⚖️ <b>تأكيد مستهدف {label}</b>\n"
-        text += f"━━━━━━━━━━━━━━\n"
-        text += f"• السعر المختار: <code>{p_display}</code>\n"
-        text += f"• الحالة: <b>{status_icon}</b>\n"
-        text += f"• النسبة المتوقعة: <b>{pnl_pct:+.2f}%</b>\n"
-        text += f"• الربح/الخسارة: <b>{expected_cash:+.2f} $</b>\n\n"
-        text += "هل تريد اعتماد هذا المستهدف وحفظه؟"
-
-        save_callback = f"conf_{risk_type}_{btn_user_id}_{trade_id}_{target_price}"
-        
-        markup = InlineKeyboardMarkup(row_width=1).add(
-            InlineKeyboardButton("✅ نعم، تأكيد الحفظ", callback_data=save_callback),
-            InlineKeyboardButton("❌ تراجع (العودة)", callback_data=f"exp_risk_{btn_user_id}_{trade_id}")
-        )
-
-        await callback_query.message.edit_text(text, reply_markup=markup, parse_mode="HTML")
-        await callback_query.answer()
-
-    except Exception as e:
-        logging.error(f"Error in automated risk: {e}")
-        await callback_query.answer("⚠️ خطأ في الحسابات.. تأكد من تنسيق السعر.")
-        
-
 # ==========================================
 # --- [ المعالجات Handlers ] ---
 # ==========================================
-
 # 1. معالج اختيار الهدف والتأكيد (محصّن بنظام Int)
 @dp.callback_query_handler(Text(startswith=('pr_sl_', 'pr_tp_')), state="*")
 async def handle_automated_risk_selection(callback_query: types.CallbackQuery):
@@ -1228,57 +1153,67 @@ async def callback_manage_trade_handler(callback_query: types.CallbackQuery):
 @dp.callback_query_handler(Text(startswith='pcl_'), state="*")
 async def handle_partial_protected(callback_query: types.CallbackQuery):
     try:
-        data = callback_query.data.split('_') # الهيكلية: pcl_percent_uid_tid
+        data = callback_query.data.split('_')
         percent = int(data[1])
         btn_user_id = int(data[2])
         t_id = data[3]
         
         if callback_query.from_user.id != btn_user_id:
-            return await callback_query.answer("⚠️ الصفقة محمية ضد التدخل الخارجي! 🚫", show_alert=True)
+            return await callback_query.answer("⚠️ ليس لديك صلاحية!", show_alert=True)
 
         res = supabase.table("active_trades").select("*").eq("trade_id", t_id).execute()
-        if not res.data:
-            return await callback_query.answer("⚠️ الصفقة مغلقة أو غير موجودة.", show_alert=True)
+        if not res.data: return await callback_query.answer("⚠️ الصفقة مغلقة.", show_alert=True)
             
         trade = res.data[0]
-        coin_res = supabase.table("crypto_market_simulation").select("current_price").eq("symbol", trade['symbol']).execute()
-        current_price = int(float(coin_res.data[0]['current_price'])) if coin_res.data else int(float(trade['entry_price']))
+        symbol = trade['symbol']
+        coin_res = supabase.table("crypto_market_simulation").select("current_price").eq("symbol", symbol).execute()
+        current_price = float(coin_res.data[0]['current_price']) if coin_res.data else float(trade['entry_price'])
 
-        # حسابات الإغلاق بأمان (int)
-        old_margin = int(float(trade['margin']))
-        old_entry = int(float(trade['entry_price']))
+        # الحسابات
+        margin = float(trade['margin'])
+        entry = float(trade['entry_price'])
         lev = int(trade['leverage'])
         side = trade['side']
-        qty = int(float(trade.get('quantity', 0)))
+        qty = float(trade.get('quantity', 0))
 
-        margin_to_close = int(old_margin * (percent / 100))
-        pnl_pct = (current_price - old_entry) / old_entry if side == 'LONG' else (old_entry - current_price) / old_entry
-        pnl_amount = int(margin_to_close * pnl_pct * lev)
-        return_to_bank = max(0, margin_to_close + pnl_amount)
+        margin_to_close = margin * (percent / 100)
+        qty_to_close = qty * (percent / 100)
+        
+        # حساب الربح أو الخسارة للجزء المغلق
+        pnl_pct = (current_price - entry) / entry if side == 'LONG' else (entry - current_price) / entry
+        pnl_amount = margin_to_close * pnl_pct * lev
+        
+        # العائد للمحفظة (الهامش المغلق + الربح أو الخسارة)
+        return_to_bank = margin_to_close + pnl_amount
 
-        # تحديث البنك
+        # تحديث البنك (إضافة أو خصم تلقائي لأن pnl_amount قد تكون بالسالب)
         user_res = supabase.table("users_global_profile").select("bank_balance").eq("user_id", btn_user_id).execute()
-        new_bank = int(float(user_res.data[0]['bank_balance'])) + return_to_bank
+        new_bank = float(user_res.data[0]['bank_balance']) + return_to_bank
         supabase.table("users_global_profile").update({"bank_balance": new_bank}).eq("user_id", btn_user_id).execute()
 
         # تحديث الصفقة
-        new_margin = old_margin - margin_to_close
-        new_qty = int(qty * (1 - (percent / 100)))
-        
+        new_margin = margin - margin_to_close
+        new_qty = qty - qty_to_close
         supabase.table("active_trades").update({"margin": new_margin, "quantity": new_qty}).eq("trade_id", t_id).execute()
         
-        await callback_query.answer(f"✅ تم إغلاق {percent}% بنجاح!\n💰 عائد للمحفظة: {return_to_bank:,} $", show_alert=True)
+        # القالب التفصيلي للإغلاق الجزئي
+        pnl_emoji = "🟢" if pnl_amount >= 0 else "🔴"
+        text = f"✂️ <b>إغلاق جزئي للصفقة: #{symbol}</b>\n"
+        text += f"━━━━━━━━━━━━━━━━━━\n"
+        text += f"• نسبة الإغلاق: <b>{percent}%</b>\n"
+        text += f"• الكمية المغلقة: <b>{qty_to_close:.4f}</b>\n"
+        text += f"• الربح/الخسارة: <b>{pnl_amount:.2f}$</b> {pnl_emoji}\n"
+        text += f"• تم الإضافة للمحفظة: <b>{return_to_bank:.2f}$</b>"
+
+        await callback_query.answer("✅ تمت العملية!", show_alert=False)
+        await callback_query.message.answer(text, parse_mode="HTML") # رسالة إشعار
         
-        # إعادة التوجيه لتحديث الواجهة
         callback_query.data = f"manage_trade:{t_id}"
         await callback_manage_trade_handler(callback_query)
 
     except Exception as e:
-        import logging
-        logging.error(f"Error in Partial Close: {e}")
-        await callback_query.answer("❌ حدث خطأ أثناء الإغلاق الجزئي.")
-
-
+        await callback_query.answer("❌ خطأ أثناء الإغلاق.")
+        
 # ==========================================
 # 6. معالج التعزيز (DCA)
 # ==========================================
@@ -1344,7 +1279,6 @@ async def handle_dca_protected(callback_query: types.CallbackQuery):
         logging.error(f"Error in DCA: {e}")
         await callback_query.answer("❌ حدث خطأ أثناء التعزيز.")
 
-
 # ==========================================
 # 7. بوابة التأكيد القصوى (للإغلاق 100% والتعزيز 100%)
 # ==========================================
@@ -1394,59 +1328,100 @@ async def security_gate_protected(callback_query: types.CallbackQuery):
 @dp.callback_query_handler(Text(startswith='exe_'), state="*")
 async def final_execution_logic(callback_query: types.CallbackQuery):
     try:
-        # 1. تفكيك البيانات المرسلة من زر "نعم، نفذ الآن"
-        # الصيغة: exe_action_percent_uid_tid
         data = callback_query.data.split('_')
-        action = data[1]     # 'cl' للإغلاق أو 'dca' للتعزيز
-        percent = data[2]    # القيمة (مثلاً 100)
+        action = data[1]     # 'cl' أو 'dca'
+        percent = float(data[2])
         user_id = int(data[3])
-        t_id = data[4]       # آيدي الصفقة في قاعدة البيانات
+        t_id = data[4]
 
-        # 2. الجدار الناري لحماية الحساب
         if callback_query.from_user.id != user_id:
-            return await callback_query.answer("⚠️ خطأ في الصلاحية! 🚫", show_alert=True)
+            return await callback_query.answer("⚠️ خطأ في الصلاحية!", show_alert=True)
 
-        # 3. إشعار المستخدم بالبدء
-        await callback_query.answer("⏳ جاري معالجة الطلب في السوق...", show_alert=False)
+        await callback_query.answer("⏳ جاري التنفيذ في السوق...", show_alert=False)
 
-        # 4. جلب بيانات الصفقة للتأكد من وجودها
         res = supabase.table("active_trades").select("*").eq("trade_id", t_id).execute()
         if not res.data:
-            return await callback_query.message.edit_text("❌ خطأ: الصفقة لم تعد موجودة في السجلات.")
-
+            return await callback_query.message.edit_text("❌ الصفقة مغلقة أو غير موجودة.")
         trade = res.data[0]
         symbol = trade['symbol']
+        
+        coin_res = supabase.table("crypto_market_simulation").select("current_price").eq("symbol", symbol).execute()
+        current_price = float(coin_res.data[0]['current_price']) if coin_res.data else float(trade['entry_price'])
 
-        # 5. منطق التنفيذ بناءً على النوع
+        margin = float(trade['margin'])
+        entry = float(trade['entry_price'])
+        lev = int(trade['leverage'])
+        side = trade['side']
+        qty = float(trade.get('quantity', 0))
+
         if action == 'cl':
-            # --- [هنا تضع كود إغلاق الصفقة الفعلي] ---
-            # مثال: حذف الصفقة من جدول النشط ونقلها لجدول الأرشيف
+            # --- الإغلاق الكلي 100% ---
+            pnl_pct = (current_price - entry) / entry if side == 'LONG' else (entry - current_price) / entry
+            pnl_amount = margin * pnl_pct * lev
+            return_to_bank = margin + pnl_amount
+
+            # تحديث البنك
+            user_res = supabase.table("users_global_profile").select("bank_balance").eq("user_id", user_id).execute()
+            new_bank = float(user_res.data[0]['bank_balance']) + return_to_bank
+            supabase.table("users_global_profile").update({"bank_balance": new_bank}).eq("user_id", user_id).execute()
+
+            # أرشفة وحذف
             supabase.table("active_trades").delete().eq("trade_id", t_id).execute()
             
-            success_text = f"✅ <b>تم إغلاق صفقة #{symbol} بنجاح!</b>\n"
+            pnl_emoji = "🟢" if pnl_amount >= 0 else "🔴"
+            success_text = f"✅ <b>تم الإغلاق الكلي: #{symbol}</b>\n"
             success_text += f"━━━━━━━━━━━━━━━━━━\n"
-            success_text += f"• الحالة: تم التصفية بنسبة {percent}%\n"
-            success_text += f"• معرف العملية: <code>{t_id}</code>"
+            success_text += f"• سعر الدخول: <b>{entry:.4f}</b>\n"
+            success_text += f"• سعر الإغلاق: <b>{current_price:.4f}</b>\n"
+            success_text += f"• الكمية المغلقة: <b>{qty:.4f}</b>\n"
+            success_text += f"• الربح/الخسارة: <b>{pnl_amount:.2f} $</b> {pnl_emoji}\n"
+            success_text += f"━━━━━━━━━━━━━━━━━━\n"
+            success_text += f"💰 صافي العائد للمحفظة: <b>{return_to_bank:.2f} $</b>"
             
         elif action == 'dca':
-            # --- [هنا تضع كود تعزيز الصفقة الفعلي] ---
-            # مثال: تحديث الكمية (Volume) أو السعر المتوسط
-            success_text = f"🚀 <b>تم تعزيز صفقة #{symbol} بنجاح!</b>\n"
-            success_text += f"━━━━━━━━━━━━━━━━━━\n"
-            success_text += f"• الحالة: إضافة سيولة بنسبة {percent}%\n"
-            success_text += f"• تم تحديث متوسط الدخول آلياً."
+            # --- التعزيز الكلي/الجزئي (DCA) عبر السيولة الكلية (Cross Margin) ---
+            total_available = await get_total_available_balance(user_id)
+            dca_amount = total_available * (percent / 100)
+            
+            if dca_amount < 1:
+                return await callback_query.message.edit_text("❌ الرصيد المتاح الشامل لا يكفي للتعزيز.")
 
-        # 6. تحديث الرسالة بالنتيجة النهائية وإظهار زر العودة
-        markup = InlineKeyboardMarkup().add(
-            InlineKeyboardButton("📋 العودة لصفقاتي", callback_data=f"active_trades_view:{user_id}")
-        )
-        
+            # معادلة بينانس (Weighted Average Entry)
+            new_qty_added = (dca_amount * lev) / current_price
+            total_qty = qty + new_qty_added
+            new_margin = margin + dca_amount
+            
+            # السعر المرجح = (الكمية القديمة × الدخول القديم + الكمية المضافة × السعر الحالي) / الكمية الكلية
+            new_entry_price = ((qty * entry) + (new_qty_added * current_price)) / total_qty
+
+            # خصم المبلغ من المحفظة الفعلية 
+            user_res = supabase.table("users_global_profile").select("bank_balance").eq("user_id", user_id).execute()
+            current_bank = float(user_res.data[0]['bank_balance'])
+            supabase.table("users_global_profile").update({"bank_balance": current_bank - dca_amount}).eq("user_id", user_id).execute()
+
+            # تحديث الصفقة
+            supabase.table("active_trades").update({
+                "margin": new_margin,
+                "quantity": total_qty,
+                "entry_price": new_entry_price
+            }).eq("trade_id", t_id).execute()
+
+            success_text = f"🚀 <b>تم تعزيز الصفقة: #{symbol}</b>\n"
+            success_text += f"━━━━━━━━━━━━━━━━━━\n"
+            success_text += f"• سعر الدخول القديم: <b>{entry:.4f}</b>\n"
+            success_text += f"• الكمية المضافة: <b>{new_qty_added:.4f}</b>\n"
+            success_text += f"• المبلغ المضاف: <b>{dca_amount:.2f} $</b>\n"
+            success_text += f"━━━━━━━━━━━━━━━━━━\n"
+            success_text += f"🎯 <b>متوسط الدخول الجديد: {new_entry_price:.4f}</b>"
+
+        markup = InlineKeyboardMarkup().add(InlineKeyboardButton("📋 العودة لصفقاتي", callback_data=f"active_trades_view:{user_id}"))
         await callback_query.message.edit_text(success_text, reply_markup=markup, parse_mode="HTML")
 
     except Exception as e:
-        logging.error(f"Critical Execution Error: {e}")
-        await callback_query.answer("❌ فشل النظام في تنفيذ الأمر. حاول مجدداً.", show_alert=True)
-
+        import logging
+        logging.error(f"Execution Error: {e}")
+        await callback_query.answer("❌ فشل التنفيذ.", show_alert=True)
+        
 # ==========================================
 # 9. زر العودة للوحة التحكم الرئيسية للصفقة (Back Button)
 # ==========================================
