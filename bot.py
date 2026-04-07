@@ -459,7 +459,7 @@ def get_market_keyboard(user_id):
     
     # إضافة الأزرار الرئيسية في صفوف منفصلة
     markup.add(InlineKeyboardButton("🏦 محفظتي الماليـة", callback_data=f"wallet_view:{user_id}"))
-    markup.add(InlineKeyboardButton("📋 صفقاتي المفتوحة", callback_data=f"active_trades_view:{user_id}"))
+    markup.add(InlineKeyboardButton("📋 صفقاتي المفتوحة", callback_data=f"active_trades_view_:{user_id}"))
     
     return markup
  # ==========================================
@@ -561,7 +561,7 @@ def get_wallet_keyboard(user_id, debt):
         
     # صف السوق والصفقات
     markup.row(
-        InlineKeyboardButton("📋 صفقاتي", callback_data=f"active_trades_view:{user_id}"),
+        InlineKeyboardButton("📋 صفقاتي", callback_data=f"active_trades_view_:{user_id}"),
         InlineKeyboardButton("🛒 السوق", callback_data=f"market_tab:{user_id}:trending")
     )
     return markup
@@ -784,8 +784,8 @@ async def callback_market_tabs(callback_query: types.CallbackQuery):
             InlineKeyboardButton("📈 الرابحة", callback_data=f"market_tab:{user_id}:gainers"),
             InlineKeyboardButton("📉 الخاسرة", callback_data=f"market_tab:{user_id}:losers")
         )
-        markup.row(InlineKeyboardButton("🔙 العودة للمحفظة", callback_data=f"wallet:{user_id}"))
-
+        markup.add(InlineKeyboardButton("🔙 عودة للمحفظة", callback_data=f"wallet_view:{user_id}"))
+        
         await callback_query.message.edit_text(text, reply_markup=markup, parse_mode="HTML")
 
     except Exception as e:
@@ -996,7 +996,7 @@ async def process_trade_confirm(callback_query: types.CallbackQuery):
         text += f"رصيدك المتبقي: {int(new_balance):,} $"
         
         markup = InlineKeyboardMarkup()
-        markup.add(InlineKeyboardButton("📋 عرض صفقاتي", callback_data=f"active_trades_view:{user_id}"))
+        markup.add(InlineKeyboardButton("📋 عرض صفقاتي", callback_data=f"active_trades_view_:{user_id}"))
         markup.add(InlineKeyboardButton("🔙 العودة للسوق", callback_data=f"market_tab:{user_id}:trending"))
         
         await callback_query.message.edit_text(text, reply_markup=markup, parse_mode="HTML")
