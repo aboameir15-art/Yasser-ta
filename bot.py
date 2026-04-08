@@ -1750,10 +1750,10 @@ async def market_updater_background_task():
     while True:
         try:
             await update_crypto_market_data()
-            await asyncio.sleep(120) 
+            await asyncio.sleep(900) 
         except Exception as e:
             logging.error(f"Market Updater Loop Error: {e}")
-            await asyncio.sleep(120)
+            await asyncio.sleep(900)
             
 # ==========================================
 # 5. نهاية الملف: نظام الإنعاش الأبدي 24/7 (النبض الذاتي) ⚡
