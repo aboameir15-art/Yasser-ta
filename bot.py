@@ -908,69 +908,79 @@ async def callback_view_trades(callback_query: types.CallbackQuery):
     except Exception as e:
         logging.error(f"Callback View Error: {e}")
         await callback_query.message.answer(f"❌ فشل عرض الصفقات.")
-        
-        
 @dp.callback_query_handler(Text(startswith='coin_view:'), state="*")
 async def process_coin_view(callback_query: types.CallbackQuery):
-    # 🔐 القفل الأمني: التحقق من هوية المستخدم
-    data_parts = callback_query.data.split(':')
-    owner_id = int(data_parts[1])
-    visitor_id = callback_query.from_user.id
+    try:
+        # 1. تفكيك البيانات باختصار
+        data_parts = callback_query.data.split(':')
+        owner_id = int(data_parts[1])
+        symbol = data_parts[2]
+        visitor_id = callback_query.from_user.id
 
-    if visitor_id != owner_id:
-        return await callback_query.answer("⚠️ هذه البيانات ليست لك! ابحث عن العملة من خلال محفظتك.", show_alert=True)
+        # 🔐 القفل الأمني
+        if visitor_id != owner_id:
+            return await callback_query.answer("⚠️ هذه البيانات ليست لك!", show_alert=True)
 
-    if not await is_authorized(callback_query): return
-    
-    symbol = data_parts[2]
-    # جلب البيانات من سوبابيس (تدعم الفواصل الآن)
-    res = supabase.table("crypto_market_simulation").select("*").eq("symbol", symbol).execute()
-    
-    if not res.data:
-        return await callback_query.answer("⚠️ العملة غير موجودة!", show_alert=True)
+        # 2. جلب البيانات من سوبابيس
+        res = supabase.table("crypto_market_simulation").select("*").eq("symbol", symbol).execute()
         
-    coin = res.data[0]
-    # تحويل البيانات إلى float لضمان دقة الحسابات
-    price = float(coin['current_price'])
-    ema50 = float(coin.get('ema_50', price))
-    rsi = float(coin.get('rsi_val', 50))
-    bb_upper = float(coin.get('bb_upper', price * 1.05))
-    bb_lower = float(coin.get('bb_lower', price * 0.95))
-    bb_mid = float(coin.get('bb_middle', price))
-    direction = coin.get('last_tick_direction', 'UP')
-    
-    # تحديد الحالة الفنية بناءً على استراتيجيتك
-    ema_status = "السعر فوق الخط 🟢 صعود" if price > ema50 else "السعر تحت الخط 🔴 هبوط"
-    
-    if rsi >= 78: 
-        rsi_status = "تشبع شرائي ذروة 🔴 (احذر)"
-    elif rsi <= 22: 
-        rsi_status = "تشبع بيعي ذروة 🟢 (فرصة)"
-    else: 
-        rsi_status = "منطقة محايدة 🟡"
-    
-    # 🎨 تنسيق السعر بشكل ذكي: 4 أرقام إذا كان تحت الدولار، ورقمين إذا كان فوق
-    p_fmt = f"{price:,.4f}" if price < 1 else f"{price:,.2f}"
-    
-    text = f"🪙 | <b>عـمـلـة: #{symbol}</b>\n"
-    text += f"💰 الـسـعـر الـحـالـي: <code>{p_fmt} $</code>\n"
-    text += f"📉 نـسـبـة 24س: {float(coin['change_24h']):+.2f}%\n"
-    text += "━━━━━━━━━━━━━━━━━━\n"
-    text += f"📊 <b>الـمـؤشـرات الـفـنـيـة (Live):</b>\n"
-    text += f"• <b>EMA 50:</b> <code>{ema50:,.4f if ema50 < 1 else :,.2f}</code> ({ema_status})\n"
-    text += f"• <b>RSI (78/22):</b> <code>{rsi:.1f}</code> ({rsi_status})\n"
-    text += f"• <b>Bollinger MID:</b> <code>{bb_mid:,.4f if bb_mid < 1 else :,.2f}</code>\n"
-    text += f"    - المقاومة (أصفر): <code>{bb_upper:,.4f if bb_upper < 1 else :,.2f}</code>\n"
-    text += f"    - الدعم (أصفر): <code>{bb_lower:,.4f if bb_lower < 1 else :,.2f}</code>\n\n"
-    
-    # إضافة شكل الشمعة (دالتك الأصلية)
-    text += f"شكل الشمعة الحالية:\n{generate_candle_chart(direction)}\n"
-    text += "━━━━━━━━━━━━━━━━━━\n"
-    text += "اختر إجراء التداول الآن 👇:"
+        if not res.data:
+            return await callback_query.answer("⚠️ العملة غير موجودة!", show_alert=True)
+            
+        coin = res.data[0]
+        
+        # 3. تحويل وتجهيز الأرقام (Float)
+        price = float(coin['current_price'])
+        ema50 = float(coin.get('ema_50', price))
+        rsi = float(coin.get('rsi_val', 50))
+        bb_upper = float(coin.get('bb_upper', price * 1.05))
+        bb_lower = float(coin.get('bb_lower', price * 0.95))
+        bb_mid = float(coin.get('bb_middle', price))
+        direction = coin.get('last_tick_direction', 'UP')
+        change = float(coin.get('change_24h', 0))
+        
+        # دالة التنسيق الذكي للأرقام
+        def f_num(val):
+            return f"{val:,.4f}" if val < 1 else f"{val:,.2f}"
 
-    # نمرر owner_id إلى الكيبورد لضمان بقاء القفل في الخطوة التالية (فتح الصفقة)
-    await callback_query.message.edit_text(text, reply_markup=get_coin_keyboard(owner_id, symbol), parse_mode="HTML")
-    
+        # 4. الحالة الفنية (حسب استراتيجيتك 78/22)
+        ema_status = "🟢 فوق الخط" if price > ema50 else "🔴 تحت الخط"
+        
+        if rsi >= 78: 
+            rsi_status = "🔥 تشبع شراء"
+        elif rsi <= 22: 
+            rsi_status = "❄️ تشبع بيع"
+        else: 
+            rsi_status = "🟡 محايد"
+        
+        # 5. بناء النص (ناري واحترافي)
+        text = f"🪙 | <b>مـراقب الـسوق: #{symbol}</b>\n"
+        text += f"━━━━━━━━━━━━━━━━━━\n"
+        text += f"💰 الـسعر: <code>{f_num(price)} $</code> ({change:+.2f}%)\n"
+        text += f"📊 <b>التحليل الفني (Live):</b>\n"
+        text += f"• <b>EMA 50:</b> <code>{f_num(ema50)}</code> | {ema_status}\n"
+        text += f"• <b>RSI:</b> <code>{rsi:.1f}</code> | {rsi_status}\n"
+        text += f"• <b>Bollinger Bands:</b>\n"
+        text += f"   - سقف: <code>{f_num(bb_upper)}</code>\n"
+        text += f"   - قاع: <code>{f_num(bb_lower)}</code>\n"
+        text += "━━━━━━━━━━━━━━━━━━\n"
+        text += f"<b>شكل الشمعة الحالية:</b>\n{generate_candle_chart(direction)}\n"
+        text += "━━━━━━━━━━━━━━━━━━\n"
+        text += "اختر إجراء التداول الآن 👇:"
+
+        # تحديث الرسالة
+        await callback_query.message.edit_text(
+            text, 
+            reply_markup=get_coin_keyboard(owner_id, symbol), 
+            parse_mode="HTML"
+        )
+        await callback_query.answer()
+
+    except Exception as e:
+        import logging
+        logging.error(f"Coin View Error: {e}")
+        await callback_query.answer("❌ خطأ في عرض بيانات العملة.")        
+
 # ==========================================
 # 7. معالجات دورة الصفقة (المطورة لدعم الفواصل والأمان)
 # ==========================================
