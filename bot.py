@@ -1484,7 +1484,112 @@ async def exec_loan_handler(callback_query: types.CallbackQuery):
         logging.error(f"❌ Loan Error: {e}")
         await callback_query.answer("❌ فشل في تحديث قاعدة البيانات، حاول لاحقاً.", show_alert=True)
         
-        # ==========================================
+
+import asyncio
+import aiohttp
+
+# --- [ إعدادات سوبابيس ] ---
+SUPABASE_URL = "https://snlcbtgzdxsacwjipggn.supabase.co"
+SUPABASE_KEY = "مفتاح_سوبابيس_الخاص_بك_هنا"
+
+async def async_manual_upsert(table_name, records):
+    """
+    دالة لرفع البيانات بشكل غير متزامن.
+    resolution=merge-duplicates تعني: إذا كان الـ symbol موجوداً، قم بتحديث السعر والمؤشرات.
+    إذا لم يكن موجوداً، قم بإضافته.
+    """
+    headers = {
+        "apikey": SUPABASE_KEY,
+        "Authorization": f"Bearer {SUPABASE_KEY}",
+        "Content-Type": "application/json",
+        "Prefer": "resolution=merge-duplicates" # 🟢 السر هنا لتجنب التكرار وتحديث البيانات فقط
+    }
+    endpoint = f"{SUPABASE_URL}/rest/v1/{table_name}"
+    
+    async with aiohttp.ClientSession() as session:
+        try:
+            async with session.post(endpoint, json=records, headers=headers, timeout=60) as response:
+                return response.status in [200, 201]
+        except Exception as e:
+            import logging
+            logging.error(f"Supabase Upsert Error: {e}")
+            return False
+
+async def update_crypto_market_data():
+    """دالة تحديث الأسعار والمؤشرات تسحب من بينانس وترفع لسوبابيس"""
+    binance_url = "https://api.binance.com/api/v3/ticker/24hr"
+    
+    async with aiohttp.ClientSession() as session:
+        try:
+            async with session.get(binance_url, timeout=30) as res:
+                data = await res.json()
+        except Exception as e:
+            import logging
+            logging.error(f"Binance API Error: {e}")
+            return
+
+    # فلترة عملات USDT
+    usdt_pairs = [coin for coin in data if coin['symbol'].endswith('USDT')]
+    
+    records = []
+    for coin in usdt_pairs:
+        try:
+            price = float(coin['lastPrice'])
+            
+            # فلترة العملات أقل من 1 دولار
+            if price < 1.0: 
+                continue
+                
+            change_percent = float(coin['priceChangePercent'])
+            
+            # تجهيز السجل (نفس أعمدتك وتنسيقك)
+            records.append({
+                "symbol": coin['symbol'],
+                "name": coin['symbol'].replace("USDT", ""),
+                "current_price": int(price), 
+                "open_price_24h": int(float(coin['openPrice'])),
+                "high_24h": int(float(coin['highPrice'])),
+                "low_24h": int(float(coin['lowPrice'])),
+                "volume_24h": int(float(coin['volume'])),
+                "change_24h": int(change_percent),
+                # تحديث المؤشرات الوهمية أو الحقيقية بناءً على السعر الجديد
+                "ema_20": int(price), 
+                "ema_50": int(price),
+                "rsi_val": 50,
+                "bb_upper": int(price * 1.02),
+                "bb_middle": int(price),
+                "bb_lower": int(price * 0.98),
+                "last_tick_direction": "UP" if change_percent >= 0 else "DOWN"
+            })
+        except: 
+            continue
+
+    # ترتيب حسب الحجم
+    records.sort(key=lambda x: x['volume_24h'], reverse=True)
+    total_to_upload = len(records)
+    
+    # الرفع على دفعات لتخفيف الضغط
+    batch_size = 50 # يمكنك زيادة العدد إلى 50 لأن aiohttp سريع
+    for i in range(0, total_to_upload, batch_size):
+        batch = records[i:i + batch_size]
+        success = await async_manual_upsert("crypto_market_simulation", batch)
+        if not success:
+            import logging
+            logging.warning(f"⚠️ فشل تحديث الدفعة عند {i}")
+
+async def market_updater_background_task():
+    """تعمل هذه الدالة في الخلفية لتحديث السوق كل X ثانية"""
+    while True:
+        try:
+            await update_crypto_market_data()
+            # سينتظر البوت 60 ثانية قبل التحديث القادم (يمكنك تعديلها)
+            await asyncio.sleep(60) 
+        except Exception as e:
+            import logging
+            logging.error(f"Market Updater Loop Error: {e}")
+            await asyncio.sleep(60) # الانتظار قليلاً في حال حدوث خطأ حتى لا ينهار البوت
+            
+# ==========================================
 # 5. نهاية الملف: نظام الإنعاش الأبدي 24/7 (النبض الذاتي) ⚡
 # ==========================================
 from aiohttp import web
