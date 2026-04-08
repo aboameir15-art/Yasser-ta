@@ -754,7 +754,7 @@ async def listener_market(message: types.Message):
     user_id = message.from_user.id
     
     # جلب العملات من السوق (Binance Mode)
-    res = supabase.table("crypto_market_simulation").select("*").order("volume_24h", desc=True).limit(5).execute()
+    res = supabase.table("crypto_market_simulation").select("*").order("volume_24h", desc=True).limit(20).execute()
     coins = res.data
     
     text = "📊 | <b>سـوق الـعـمـلات (Binance Mode)</b>\n"
@@ -821,13 +821,13 @@ async def callback_market_tabs(callback_query: types.CallbackQuery):
         
         # جلب البيانات بناءً على التبويب
         if tab_type == 'gainers':
-            res = supabase.table("crypto_market_simulation").select("*").order("change_24h", desc=True).limit(15).execute()
+            res = supabase.table("crypto_market_simulation").select("*").order("change_24h", desc=True).limit(25).execute()
             header = "📈 <b>الأعلى ربحاً (24h):</b>"
         elif tab_type == 'losers':
-            res = supabase.table("crypto_market_simulation").select("*").order("change_24h", desc=False).limit(15).execute()
+            res = supabase.table("crypto_market_simulation").select("*").order("change_24h", desc=False).limit(25).execute()
             header = "📉 <b>الأكثر خسارة (24h):</b>"
         else: # trending
-            res = supabase.table("crypto_market_simulation").select("*").order("volume_24h", desc=True).limit(15).execute()
+            res = supabase.table("crypto_market_simulation").select("*").order("volume_24h", desc=True).limit(25).execute()
             header = "🔥 <b>الأكثر رواجاً (السيولة):</b>"
             
         if not res.data:
