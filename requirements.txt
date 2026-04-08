@@ -8,3 +8,4 @@ arabic-reshaper
 python-bidi
 pilmoji
 requests
+ccxt
