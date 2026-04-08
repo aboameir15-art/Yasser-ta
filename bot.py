@@ -1514,16 +1514,24 @@ async def async_manual_upsert(table_name, records):
 import ccxt.async_support as ccxt
 
 async def update_crypto_market_data():
+    # الحل الوحيد هو الخروج عبر بروكسي لتغيير موقع السيرفر
+    # يمكنك البحث عن (Free Proxy List) أو استخدام خدمة مثل (Webshare)
+    # مثال لبروكسي (يجب استبداله ببروكسي عامل):
+    proxy_url = "http://username:password@proxy_address:port"
+
     exchange = ccxt.binance({
         'enableRateLimit': True,
+        'aiohttp_proxy': proxy_url, # 🟢 هذا هو السطر السحري
         'options': {'defaultType': 'spot'}
     })
     
     try:
-        # هذه الدالة في ccxt تجلب كل الأسعار وتتعامل مع الحظر بشكل أفضل
         tickers = await exchange.fetch_tickers()
-        await exchange.close() # إغلاق الاتصال بأمان
+        await exchange.close()
         
+        # ... بقية منطق المعالجة كما هو ...
+        print("✅ تم كسر الحظر الجغرافي باستخدام البروكسي!")
+ 
         records = []
         for symbol, data in tickers.items():
             if not symbol.endswith('/USDT'): continue
