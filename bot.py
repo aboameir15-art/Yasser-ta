@@ -79,38 +79,49 @@ DURATION_KEYS = list(DURATION_MAP.keys())
 # ==========================================
 # --- [ حساب التعزيز و الاغلاق ] ---
 # ==========================================
-async def get_total_available_balance(user_id):
-    # 1. جلب الرصيد الحر من المحفظة
-    user_res = supabase.table("users_global_profile").select("bank_balance").eq("user_id", user_id).execute()
-    # تأمين التحويل إلى int
-    free_bank = int(float(user_res.data[0]['bank_balance']))
+async def get_trading_account_snapshot(user_id):
+    """
+    تحليل كامل للمحفظة: العربون المستخدم، الأرباح العائمة، والسيولة المتاحة للتعزيز.
+    """
+    # 1. جلب الرصيد الكاش من البنك
+    user_data = supabase.table("users_global_profile").select("bank_balance").eq("user_id", user_id).execute()
+    free_cash = int(float(user_data.data[0]['bank_balance'])) if user_data.data else 0
     
-    # 2. جلب جميع الصفقات النشطة لحساب الربح/الخسارة العائم
-    trades_res = supabase.table("active_trades").select("*").eq("user_id", user_id).execute()
-    if not trades_res.data:
-        return free_bank
+    # 2. جلب جميع الصفقات النشطة
+    trades = supabase.table("active_trades").select("*").eq("user_id", user_id).execute()
+    
+    total_used_margin = 0  # إجمالي العربون المحجوز في الصفقات
+    total_unrealized_pnl = 0  # إجمالي الأرباح والخسائر الحالية
+    
+    for t in trades.data:
+        # حساب العربون الكلي المستخدم
+        total_used_margin += int(t['margin'])
         
-    total_unrealized_pnl = 0
-    for t in trades_res.data:
-        coin_res = supabase.table("crypto_market_simulation").select("current_price").eq("symbol", t['symbol']).execute()
-        cp = int(float(coin_res.data[0]['current_price'])) if coin_res.data else int(float(t['entry_price']))
-        ep = int(float(t['entry_price']))
-        margin = int(float(t['margin']))
-        lev = int(t['leverage'])
-        side = t['side']
-        
-        # حماية من القسمة على صفر
-        if ep > 0:
-            pnl_pct = (cp - ep) / ep if side == 'LONG' else (ep - cp) / ep
-        else:
-            pnl_pct = 0
+        # حساب الربح/الخسارة لكل صفقة (Mark Price)
+        coin = supabase.table("crypto_market_simulation").select("current_price").eq("symbol", t['symbol']).execute()
+        if coin.data:
+            cur_p = int(float(coin.data[0]['current_price']))
+            ent_p = int(t['entry_price'])
+            lev = int(t['leverage'])
+            mar = int(t['margin'])
+            side = t['side']
             
-        pnl = int(margin * pnl_pct * lev)
-        total_unrealized_pnl += pnl
-        
-    return max(0, free_bank + total_unrealized_pnl)
+            # معادلة PNL: (السعر الحالي - سعر الدخول) / سعر الدخول * الهامش * الرافعة
+            pnl_pct = (cur_p - ent_p) / ent_p if side == 'LONG' else (ent_p - cur_p) / ent_p
+            total_unrealized_pnl += int(mar * pnl_pct * lev)
+
+    # 3. حساب "المتبقي الفعلي" (Equity) والسيولة المتاحة للتعزيز
+    # المتبقي = الكاش + الأرباح العائمة (نظام الكروس مارجن)
+    available_for_dca = max(0, free_cash + total_unrealized_pnl)
     
-    
+    return {
+        "free_cash": free_cash,              # الكاش المتوفر
+        "used_margin": total_used_margin,    # العربون المحجوز حالياً
+        "total_pnl": total_unrealized_pnl,   # أرباح/خسائر كل الصفقات
+        "available_equity": available_for_dca # المبلع المتاح للاستخدام في التعزيز
+    }
+
+
 async def trade_reaper():
     """رادار لمراقبة تصفية الصفقات وانتهاء الوقت"""
     while True:
@@ -1193,103 +1204,83 @@ async def universal_execution_engine(callback_query: types.CallbackQuery):
         _, action, percent, u_id, t_id = callback_query.data.split('_')
         percent, user_id = int(percent), int(u_id)
 
-        if callback_query.from_user.id != user_id:
-            return await callback_query.answer("⚠️ لا تتدخل في صفقات غيرك!", show_alert=True)
-
-        # 1. جلب بيانات الصفقة المستهدفة
+        # جلب بيانات الحساب الشاملة من الدالة الجديدة
+        account = await get_trading_account_snapshot(user_id)
+        
+        # جلب بيانات الصفقة الحالية
         res = supabase.table("active_trades").select("*").eq("trade_id", t_id).execute()
-        if not res.data:
-            return await callback_query.message.edit_text("❌ الصفقة مغلقة.")
+        if not res.data: return await callback_query.message.edit_text("❌ الصفقة غير موجودة.")
         
         trade = res.data[0]
-        symbol = trade['symbol']
-        coin_res = supabase.table("crypto_market_simulation").select("current_price").eq("symbol", symbol).execute()
-        
+        coin_res = supabase.table("crypto_market_simulation").select("current_price").eq("symbol", trade['symbol']).execute()
         cur_price = int(float(coin_res.data[0]['current_price']))
-        margin, entry = int(trade['margin']), int(trade['entry_price'])
-        lev, side = int(trade['leverage']), trade['side']
-        qty = int(trade.get('quantity', 0))
-
+        
         success_text = ""
 
-        # --- [ منطق الإغلاق (الكلي والجزئي) ] ---
+        # --- [ وضع الإغلاق الكلي والجزئي ] ---
         if action == 'cl':
-            m_to_close = int(margin * (percent / 100))
-            q_to_close = int(qty * (percent / 100))
+            m_to_close = int(trade['margin'] * (percent / 100))
+            q_to_close = int(trade['quantity'] * (percent / 100))
             
-            # حساب PNL بناءً على الجزء المغلق
-            pnl_pct = (cur_price - entry) / entry if side == 'LONG' else (entry - cur_price) / entry
-            pnl_amt = int(m_to_close * pnl_pct * lev)
-            
-            # العائد للمحفظة: الهامش المغلق + الربح (أو - الخسارة)
+            pnl_pct = (cur_price - trade['entry_price']) / trade['entry_price'] if trade['side'] == 'LONG' else (trade['entry_price'] - cur_price) / trade['entry_price']
+            pnl_amt = int(m_to_close * pnl_pct * trade['leverage'])
             ret_to_bank = m_to_close + pnl_amt
 
-            # تحديث البنك (سحب/إيداع فوري)
-            u_prof = supabase.table("users_global_profile").select("bank_balance").eq("user_id", user_id).execute()
-            new_bank = max(0, int(u_prof.data[0]['bank_balance']) + ret_to_bank)
+            # تحديث البنك: إضافة الهامش + الربح (أو الخصم إذا خسارة)
+            new_bank = max(0, account['free_cash'] + ret_to_bank)
             supabase.table("users_global_profile").update({"bank_balance": new_bank}).eq("user_id", user_id).execute()
 
             if percent >= 100:
+                # 🛑 حذف الصفقة نهائياً من سوبابيس عند الإغلاق الكلي
                 supabase.table("active_trades").delete().eq("trade_id", t_id).execute()
-                success_text = f"✅ <b>إغلاق كلي للمركز: #{symbol}</b>\n"
+                success_text = f"✅ <b>تم إغلاق المركز بالكامل: #{trade['symbol']}</b>\n"
             else:
-                supabase.table("active_trades").update({"margin": margin - m_to_close, "quantity": qty - q_to_close}).eq("trade_id", t_id).execute()
-                success_text = f"✂️ <b>إغلاق جزئي {percent}%: #{symbol}</b>\n"
+                # تحديث الصفقة للإغلاق الجزئي
+                supabase.table("active_trades").update({
+                    "margin": int(trade['margin']) - m_to_close,
+                    "quantity": int(trade['quantity']) - q_to_close
+                }).eq("trade_id", t_id).execute()
+                success_text = f"✂️ <b>تم إغلاق جزئي {percent}%: #{trade['symbol']}</b>\n"
 
             pnl_emoji = "🟢" if pnl_amt >= 0 else "🔴"
-            success_text += f"━━━━━━━━━━━━━━━━━━\n"
-            success_text += f"• سعر الدخول: <b>{entry:,}</b>\n"
-            success_text += f"• سعر الإغلاق: <b>{cur_price:,}</b>\n"
-            success_text += f"• الكمية المغلقة: <b>{q_to_close:,}</b>\n"
-            success_text += f"• الربح/الخسارة: <b>{pnl_amt:,} $</b> {pnl_emoji}\n"
-            success_text += f"💰 صافي المضاف للمحفظة: <b>{ret_to_bank:,} $</b>"
+            success_text += f"• سعر الدخول: <b>{trade['entry_price']:,}</b>\n• سعر الإغلاق: <b>{cur_price:,}</b>\n"
+            success_text += f"• الربح/الخسارة: <b>{pnl_amt:,} $</b> {pnl_emoji}\n• العائد للبنك: <b>{ret_to_bank:,} $</b>"
 
-        # --- [ منطق التعزيز (DCA - Binance Logic) ] ---
+        # --- [ وضع التعزيز DCA ] ---
         elif action == 'dca':
-            # حساب السيولة المتاحة (رصيد البنك + أرباح الصفقات الأخرى)
-            total_avail = await get_total_available_balance(user_id)
-            dca_amt = int(total_avail * (percent / 100))
+            # نستخدم available_equity (المتبقي الفعلي بعد حساب الأرباح والخسائر العائمة)
+            dca_amt = int(account['available_equity'] * (percent / 100))
             
             if dca_amt < 1:
-                return await callback_query.answer("❌ لا يوجد رصيد متاح للتعزيز!", show_alert=True)
+                return await callback_query.answer("❌ لا يوجد سيولة كافية للتعزيز بناءً على وضع محفظتك الحالي!", show_alert=True)
 
-            # 1. حساب الكمية الجديدة المضافة
-            new_q_added = int((dca_amt * lev) / cur_price) if cur_price > 0 else 0
-            total_q = qty + new_q_added
+            # معادلة تحريك السعر (Weighted Average)
+            new_q_added = int((dca_amt * trade['leverage']) / cur_price)
+            total_q = int(trade['quantity']) + new_q_added
             
-            # 2. معادلة متوسط السعر (Weighted Average): (الكمية القديمة * سعرها + الكمية الجديدة * سعرها) / الكمية الكلية
-            # هذا يحرك منطقة الدخول مثل بينانس تماماً
-            new_entry = int(((qty * entry) + (new_q_added * cur_price)) / total_q) if total_q > 0 else entry
-            
-            # 3. تحديث قاعدة البيانات
-            u_prof = supabase.table("users_global_profile").select("bank_balance").eq("user_id", user_id).execute()
-            curr_bank = int(u_prof.data[0]['bank_balance'])
-            
-            # خصم المبلغ من البنك (مع ضمان عدم النزول للسالب)
-            supabase.table("users_global_profile").update({"bank_balance": max(0, curr_bank - dca_amt)}).eq("user_id", user_id).execute()
-            
+            # (الكمية القديمة * سعر الدخول القديم + الكمية الجديدة * السعر الحالي) / الكمية الكلية
+            new_entry = int(((int(trade['quantity']) * int(trade['entry_price'])) + (new_q_added * cur_price)) / total_q)
+
+            # الخصم من الكاش وتحديث الصفقة
+            supabase.table("users_global_profile").update({"bank_balance": max(0, account['free_cash'] - dca_amt)}).eq("user_id", user_id).execute()
             supabase.table("active_trades").update({
-                "margin": margin + dca_amt,
+                "margin": int(trade['margin']) + dca_amt,
                 "quantity": total_q,
                 "entry_price": new_entry
             }).eq("trade_id", t_id).execute()
 
-            success_text = f"🚀 <b>تعزيز المركز (DCA): #{symbol}</b>\n"
-            success_text += f"━━━━━━━━━━━━━━━━━━\n"
-            success_text += f"• السعر القديم: <b>{entry:,}</b>\n"
-            success_text += f"• المبلغ المضاف: <b>{dca_amt:,} $</b>\n"
-            success_text += f"• الكمية المضافة: <b>{new_q_added:,}</b>\n"
-            success_text += f"━━━━━━━━━━━━━━━━━━\n"
-            success_text += f"🎯 <b>متوسط الدخول الجديد: {new_entry:,}</b>"
+            success_text = f"🚀 <b>تعزيز المركز (DCA): #{trade['symbol']}</b>\n"
+            success_text += f"• السعر القديم: <b>{trade['entry_price']:,}</b>\n• المبلغ المضاف: <b>{dca_amt:,} $</b>\n"
+            success_text += f"🎯 <b>متوسط الدخول الجديد: {new_entry:,}</b>\n• إجمالي الكمية: <b>{total_q:,}</b>"
 
-        # --- [ التنظيف والتوجيه الذكي ] ---
-        final_msg = await callback_query.message.edit_text(success_text, parse_mode="HTML")
+        # إظهار النتيجة ثم التنظيف بعد 4 ثوانٍ
+        msg = await callback_query.message.edit_text(success_text, parse_mode="HTML")
         await asyncio.sleep(4)
-        await final_msg.delete()
+        await msg.delete()
 
-        # فحص وجود صفقات متبقية لتحديد وجهة المستخدم
-        trades_res = supabase.table("active_trades").select("trade_id").eq("user_id", user_id).execute()
-        if not trades_res.data:
+        # العودة للقائمة المناسبة
+        trades_left = supabase.table("active_trades").select("trade_id").eq("user_id", user_id).execute()
+        if not trades_left.data:
             from bot_handlers import send_main_portfolio
             await send_main_portfolio(callback_query.message, user_id)
         else:
@@ -1298,9 +1289,8 @@ async def universal_execution_engine(callback_query: types.CallbackQuery):
             await callback_view_trades(callback_query)
 
     except Exception as e:
-        import logging
-        logging.error(f"Binance Engine Error: {e}")
-        await callback_query.answer("❌ فشل في معالجة العملية.")
+        logging.error(f"Logic Error: {e}")
+        await callback_query.answer("❌ حدث خطأ في الحسابات.")
         
 # ==========================================
 # 9. زر العودة للوحة التحكم الرئيسية للصفقة (Back Button)
