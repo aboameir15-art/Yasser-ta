@@ -1511,29 +1511,28 @@ async def async_manual_upsert(table_name, records):
             logging.error(f"Supabase Upsert Error: {e}")
             return False
 
-
 async def update_crypto_market_data():
-    # قائمة الروابط البديلة لبينانس لتجنب خطأ 451
-    endpoints = [
-        "https://api.binance.com/api/v3/ticker/24hr",
-        "https://api1.binance.com/api/v3/ticker/24hr",
-        "https://api2.binance.com/api/v3/ticker/24hr",
-        "https://api3.binance.com/api/v3/ticker/24hr"
-    ]
+    # استخدام رابط وسيط للالتفاف على الحظر الجغرافي
+    # هذا الرابط يعمل كـ Bridge بين سيرفرك وبينانس
+    proxy_url = "https://api.allorigins.win/get?url="
+    target_url = "https://api.binance.com/api/v3/ticker/24hr"
     
-    data = None
+    final_url = f"{proxy_url}{target_url}"
+    
     async with aiohttp.ClientSession() as session:
-        for url in endpoints:
-            try:
-                async with session.get(url, timeout=15) as res:
-                    if res.status == 200:
-                        data = await res.json()
-                        break # إذا نجح الاتصال نخرج من الحلقة
-                    else:
-                        logging.warning(f"⚠️ {url} returned status {res.status}")
-            except Exception as e:
-                logging.error(f"❌ Connection failed for {url}: {e}")
-                continue
+        try:
+            async with session.get(final_url, timeout=30) as res:
+                if res.status == 200:
+                    response_json = await res.json()
+                    # لأن الوسيط يلف البيانات داخل حقل 'contents'
+                    import json
+                    data = json.loads(response_json['contents'])
+                else:
+                    logging.error(f"⚠️ Proxy returned status {res.status}")
+                    return
+        except Exception as e:
+            logging.error(f"❌ Failed to bypass 451: {e}")
+            return
 
     # إذا فشلت جميع المحاولات أو كانت البيانات ليست قائمة
     if not data or not isinstance(data, list):
