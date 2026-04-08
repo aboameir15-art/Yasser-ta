@@ -1488,10 +1488,6 @@ async def exec_loan_handler(callback_query: types.CallbackQuery):
 import asyncio
 import aiohttp
 
-# --- [ إعدادات سوبابيس ] ---
-SUPABASE_URL = "https://snlcbtgzdxsacwjipggn.supabase.co"
-SUPABASE_KEY = "مفتاح_سوبابيس_الخاص_بك_هنا"
-
 async def async_manual_upsert(table_name, records):
     """
     دالة لرفع البيانات بشكل غير متزامن.
@@ -1645,8 +1641,14 @@ async def main_startup():
     logging.info(f"🌐 Server started on port {port}")
 
     # ب) تشغيل محركات التداول في الخلفية
+    # ب) تشغيل محركات التداول في الخلفية
     logging.info("⏳ جاري تشغيل محركات السوق والرادار...")
-    asyncio.create_task(trade_reaper())
+    
+    # 1. محرك تصفية الصفقات (الذي أرسلته أنت)
+    asyncio.create_task(trade_reaper()) 
+    
+    # 2. محرك تحديث الأسعار والمؤشرات من بينانس (الجديد)
+    asyncio.create_task(market_updater_background_task())
 
     # ج) تشغيل البوت (لإصدار Aiogram 2.x)
     try:
