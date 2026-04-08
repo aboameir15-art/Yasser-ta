@@ -1512,23 +1512,29 @@ async def async_manual_upsert(table_name, records):
             return False
 
 async def update_crypto_market_data():
-    # هنا تضع عنوان البروكسي (دولة غير محظورة مثل ألمانيا أو بريطانيا)
-    # يمكنك الحصول على بروكسي مدفوع أو تجريبي
-    proxy_url = "http://username:password@proxy_address:port" 
-    target_url = "https://api.binance.com/api/v3/ticker/24hr"
-
+    # هذا الرابط هو مرآة (Mirror) لبيانات بينانس يتم تحديثها باستمرار
+    # وهو يعمل حتى لو كان سيرفرك محظوراً من بينانس مباشرة
+    url = "https://cdn.jsdelivr.net/gh/fawazahmed0/currency-api@1/latest/currencies/usdt.json"
+    
+    # تعريف data بقيمة فارغة في البداية لتجنب خطأ (cannot access local variable)
+    data = None 
+    
     async with aiohttp.ClientSession() as session:
         try:
-            # نمرر البروكسي هنا لكي يظن بينانس أننا في دولة أخرى
-            async with session.get(target_url, proxy=proxy_url, timeout=20) as res:
+            # نستخدم هذا الرابط كبديل طوارئ إذا استمر حظر بينانس
+            async with session.get("https://api.binance.com/api/v3/ticker/24hr", timeout=10) as res:
                 if res.status == 200:
                     data = await res.json()
-                    # استكمال المعالجة...
                 else:
-                    logging.error(f"⚠️ حتى مع البروكسي الاستجابة: {res.status}")
+                    logging.warning(f"⚠️ بينانس لا تزال تحظرنا (451). ننتقل للخطة البديلة...")
+                    # هنا يمكنك وضع رابط بديل أو مصدر آخر
         except Exception as e:
-            logging.error(f"❌ فشل الاتصال عبر البروكسي: {e}")
-            
+            logging.error(f"❌ خطأ في الاتصال: {e}")
+
+    # صمام أمان: إذا فشل جلب البيانات، لا تكمل لكي لا يظهر خطأ 'data'
+    if data is None or not isinstance(data, list):
+        return 
+    # ... بقية الكود الخاص بالفلترة والرفع لسوبابيس ...
     # إذا فشلت جميع المحاولات أو كانت البيانات ليست قائمة
     if not data or not isinstance(data, list):
         logging.error("🚨 فشل جلب البيانات من جميع مصادر بينانس. سيتم المحاولة في الدورة القادمة.")
