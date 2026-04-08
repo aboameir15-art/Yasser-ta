@@ -1511,41 +1511,49 @@ async def async_manual_upsert(table_name, records):
             logging.error(f"Supabase Upsert Error: {e}")
             return False
 
-async def update_crypto_market_data():
-    binance_url = "https://api.binance.com/api/v3/ticker/24hr"
-    
-    async with aiohttp.ClientSession() as session:
-        try:
-            async with session.get(binance_url, timeout=30) as res:
-                if res.status != 200:
-                    logging.error(f"⚠️ Binance API returned status {res.status}")
-                    return
-                
-                data = await res.json()
-                
-                # التأكد أن البيانات القادمة هي قائمة (List) وليست نصاً أو قاموس خطأ
-                if not isinstance(data, list):
-                    logging.error(f"❌ Unexpected data format from Binance: {type(data)}")
-                    return
 
-        except Exception as e:
-            logging.error(f"Binance API Connection Error: {e}")
-            return
+async def update_crypto_market_data():
+    # قائمة الروابط البديلة لبينانس لتجنب خطأ 451
+    endpoints = [
+        "https://api.binance.com/api/v3/ticker/24hr",
+        "https://api1.binance.com/api/v3/ticker/24hr",
+        "https://api2.binance.com/api/v3/ticker/24hr",
+        "https://api3.binance.com/api/v3/ticker/24hr"
+    ]
+    
+    data = None
+    async with aiohttp.ClientSession() as session:
+        for url in endpoints:
+            try:
+                async with session.get(url, timeout=15) as res:
+                    if res.status == 200:
+                        data = await res.json()
+                        break # إذا نجح الاتصال نخرج من الحلقة
+                    else:
+                        logging.warning(f"⚠️ {url} returned status {res.status}")
+            except Exception as e:
+                logging.error(f"❌ Connection failed for {url}: {e}")
+                continue
+
+    # إذا فشلت جميع المحاولات أو كانت البيانات ليست قائمة
+    if not data or not isinstance(data, list):
+        logging.error("🚨 فشل جلب البيانات من جميع مصادر بينانس. سيتم المحاولة في الدورة القادمة.")
+        return
 
     records = []
     for coin in data:
-        try:
-            # التأكد أن coin هو قاموس قبل محاولة الوصول للمفاتيح
-            if not isinstance(coin, dict) or 'symbol' not in coin:
-                continue
-
-            symbol = coin.get('symbol', '')
-            if not symbol.endswith('USDT'):
-                continue
-                
-            price = float(coin.get('lastPrice', 0))
+        # فحص صارم: هل العنصر قاموس ويحتوي على المفاتيح المطلوبة؟
+        if not isinstance(coin, dict):
+            continue
             
-            # شرط الـ 1 دولار
+        symbol = coin.get('symbol', '')
+        if not symbol.endswith('USDT'):
+            continue
+            
+        try:
+            price_str = coin.get('lastPrice', '0')
+            price = float(price_str)
+            
             if price < 1.0: 
                 continue
                 
@@ -1568,22 +1576,16 @@ async def update_crypto_market_data():
                 "bb_lower": int(price * 0.98),
                 "last_tick_direction": "UP" if change_percent >= 0 else "DOWN"
             })
-        except (ValueError, TypeError) as e:
-            continue # تخطي أي عملة بها بيانات تالفة
+        except (ValueError, TypeError):
+            continue
 
     if records:
-        # ترتيب حسب الحجم والرفع
         records.sort(key=lambda x: x['volume_24h'], reverse=True)
-        total_to_upload = len(records)
-        
-        batch_size = 50 
-        for i in range(0, total_to_upload, batch_size):
-            batch = records[i:i + batch_size]
-            success = await async_manual_upsert("crypto_market_simulation", batch)
-            if not success:
-                logging.warning(f"⚠️ Failed to upsert batch at {i}")
-                
-
+        # الرفع لسوبابيس (Upsert)
+        success = await async_manual_upsert("crypto_market_simulation", records[:100]) # نكتفي بأفضل 100 عملة
+        if success:
+            logging.info(f"✅ تم تحديث {len(records[:100])} عملة بنجاح.")
+            
 async def market_updater_background_task():
     """تعمل هذه الدالة في الخلفية لتحديث السوق كل X ثانية"""
     while True:
