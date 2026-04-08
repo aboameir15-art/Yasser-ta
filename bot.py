@@ -1511,34 +1511,35 @@ async def async_manual_upsert(table_name, records):
             logging.error(f"Supabase Upsert Error: {e}")
             return False
 
+
 async def update_crypto_market_data():
-    # هذا الرابط هو مرآة (Mirror) لبيانات بينانس يتم تحديثها باستمرار
-    # وهو يعمل حتى لو كان سيرفرك محظوراً من بينانس مباشرة
-    url = "https://cdn.jsdelivr.net/gh/fawazahmed0/currency-api@1/latest/currencies/usdt.json"
+    # روابط بديلة لا تخضع للحظر الجغرافي (Binance Public Mirrors)
+    endpoints = [
+        "https://api1.binance.com/api/v3/ticker/24hr",
+        "https://api2.binance.com/api/v3/ticker/24hr",
+        "https://api3.binance.com/api/v3/ticker/24hr"
+    ]
     
-    # تعريف data بقيمة فارغة في البداية لتجنب خطأ (cannot access local variable)
-    data = None 
+    data = None # تعريف أولي لمنع خطأ UnboundLocalError
     
     async with aiohttp.ClientSession() as session:
-        try:
-            # نستخدم هذا الرابط كبديل طوارئ إذا استمر حظر بينانس
-            async with session.get("https://api.binance.com/api/v3/ticker/24hr", timeout=10) as res:
-                if res.status == 200:
-                    data = await res.json()
-                else:
-                    logging.warning(f"⚠️ بينانس لا تزال تحظرنا (451). ننتقل للخطة البديلة...")
-                    # هنا يمكنك وضع رابط بديل أو مصدر آخر
-        except Exception as e:
-            logging.error(f"❌ خطأ في الاتصال: {e}")
+        for url in endpoints:
+            try:
+                async with session.get(url, timeout=15) as res:
+                    if res.status == 200:
+                        temp_data = await res.json()
+                        if isinstance(temp_data, list):
+                            data = temp_data
+                            break
+                    else:
+                        logging.warning(f"⚠️ الرابط {url} أعاد خطأ {res.status}")
+            except Exception as e:
+                continue
 
-    # صمام أمان: إذا فشل جلب البيانات، لا تكمل لكي لا يظهر خطأ 'data'
-    if data is None or not isinstance(data, list):
+    # 🛡️ صمام الأمان: إذا لم ننجح في جلب البيانات، نخرج بهدوء دون أخطاء
+    if data is None:
+        logging.error("🚨 جميع المحاولات فشلت بسبب الحظر الجغرافي. سيتم التخطي.")
         return 
-    # ... بقية الكود الخاص بالفلترة والرفع لسوبابيس ...
-    # إذا فشلت جميع المحاولات أو كانت البيانات ليست قائمة
-    if not data or not isinstance(data, list):
-        logging.error("🚨 فشل جلب البيانات من جميع مصادر بينانس. سيتم المحاولة في الدورة القادمة.")
-        return
 
     records = []
     for coin in data:
