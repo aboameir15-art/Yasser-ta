@@ -9,15 +9,13 @@ jobs:
   build:
     runs-on: ubuntu-latest
     steps:
-      # تحديث إلى v4 لدعم Node.js الجديد
       - name: Checkout Code
         uses: actions/checkout@v4
 
-      # تحديث إلى v5 لضمان أفضل أداء مع بايثون
       - name: Set up Python
         uses: actions/setup-python@v5
         with:
-          python-version: '3.11' # استخدمنا نسخة أحدث ومستقرة
+          python-version: '3.11'
 
       - name: Install Dependencies
         run: pip install requests
