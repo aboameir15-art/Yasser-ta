@@ -1,1 +1,35 @@
+name: Crypto Price Updater 🚀
 
+on:
+  schedule:
+    # سيقوم GitHub بتشغيل الكود تلقائياً كل 10 دقائق (24 ساعة في اليوم)
+    - cron: '*/10 * * * *'
+  workflow_dispatch: # هذا يتيح لك تشغيله يدوياً للتجربة الآن
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+
+    steps:
+      # 1. جلب الكود من المستودع الخاص بك
+      - name: Checkout Code
+        uses: actions/checkout@v3
+
+      # 2. تجهيز بيئة بايثون على سيرفرات GitHub
+      - name: Set up Python
+        uses: actions/setup-python@v4
+        with:
+          python-version: '3.9'
+
+      # 3. تثبيت المكتبات اللازمة (CCXT لسحب الأسعار و Supabase للرفع)
+      - name: Install Dependencies
+        run: |
+          pip install ccxt supabase
+
+      # 4. تشغيل سكربت التحديث
+      - name: Run Python Script
+        env:
+          # سيتم جلب هذه القيم من Secrets التي ستضيفها في الإعدادات
+          SUPABASE_URL: ${{ secrets.SUPABASE_URL }}
+          SUPABASE_KEY: ${{ secrets.SUPABASE_KEY }}
+        run: python update_script.py
