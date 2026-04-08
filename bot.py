@@ -1512,43 +1512,54 @@ async def async_manual_upsert(table_name, records):
             return False
 
 async def update_crypto_market_data():
-    """دالة تحديث الأسعار والمؤشرات تسحب من بينانس وترفع لسوبابيس"""
     binance_url = "https://api.binance.com/api/v3/ticker/24hr"
     
     async with aiohttp.ClientSession() as session:
         try:
             async with session.get(binance_url, timeout=30) as res:
+                if res.status != 200:
+                    logging.error(f"⚠️ Binance API returned status {res.status}")
+                    return
+                
                 data = await res.json()
+                
+                # التأكد أن البيانات القادمة هي قائمة (List) وليست نصاً أو قاموس خطأ
+                if not isinstance(data, list):
+                    logging.error(f"❌ Unexpected data format from Binance: {type(data)}")
+                    return
+
         except Exception as e:
-            import logging
-            logging.error(f"Binance API Error: {e}")
+            logging.error(f"Binance API Connection Error: {e}")
             return
 
-    # فلترة عملات USDT
-    usdt_pairs = [coin for coin in data if coin['symbol'].endswith('USDT')]
-    
     records = []
-    for coin in usdt_pairs:
+    for coin in data:
         try:
-            price = float(coin['lastPrice'])
+            # التأكد أن coin هو قاموس قبل محاولة الوصول للمفاتيح
+            if not isinstance(coin, dict) or 'symbol' not in coin:
+                continue
+
+            symbol = coin.get('symbol', '')
+            if not symbol.endswith('USDT'):
+                continue
+                
+            price = float(coin.get('lastPrice', 0))
             
-            # فلترة العملات أقل من 1 دولار
+            # شرط الـ 1 دولار
             if price < 1.0: 
                 continue
                 
-            change_percent = float(coin['priceChangePercent'])
+            change_percent = float(coin.get('priceChangePercent', 0))
             
-            # تجهيز السجل (نفس أعمدتك وتنسيقك)
             records.append({
-                "symbol": coin['symbol'],
-                "name": coin['symbol'].replace("USDT", ""),
+                "symbol": symbol,
+                "name": symbol.replace("USDT", ""),
                 "current_price": int(price), 
-                "open_price_24h": int(float(coin['openPrice'])),
-                "high_24h": int(float(coin['highPrice'])),
-                "low_24h": int(float(coin['lowPrice'])),
-                "volume_24h": int(float(coin['volume'])),
+                "open_price_24h": int(float(coin.get('openPrice', 0))),
+                "high_24h": int(float(coin.get('highPrice', 0))),
+                "low_24h": int(float(coin.get('lowPrice', 0))),
+                "volume_24h": int(float(coin.get('volume', 0))),
                 "change_24h": int(change_percent),
-                # تحديث المؤشرات الوهمية أو الحقيقية بناءً على السعر الجديد
                 "ema_20": int(price), 
                 "ema_50": int(price),
                 "rsi_val": 50,
@@ -1557,21 +1568,21 @@ async def update_crypto_market_data():
                 "bb_lower": int(price * 0.98),
                 "last_tick_direction": "UP" if change_percent >= 0 else "DOWN"
             })
-        except: 
-            continue
+        except (ValueError, TypeError) as e:
+            continue # تخطي أي عملة بها بيانات تالفة
 
-    # ترتيب حسب الحجم
-    records.sort(key=lambda x: x['volume_24h'], reverse=True)
-    total_to_upload = len(records)
-    
-    # الرفع على دفعات لتخفيف الضغط
-    batch_size = 50 # يمكنك زيادة العدد إلى 50 لأن aiohttp سريع
-    for i in range(0, total_to_upload, batch_size):
-        batch = records[i:i + batch_size]
-        success = await async_manual_upsert("crypto_market_simulation", batch)
-        if not success:
-            import logging
-            logging.warning(f"⚠️ فشل تحديث الدفعة عند {i}")
+    if records:
+        # ترتيب حسب الحجم والرفع
+        records.sort(key=lambda x: x['volume_24h'], reverse=True)
+        total_to_upload = len(records)
+        
+        batch_size = 50 
+        for i in range(0, total_to_upload, batch_size):
+            batch = records[i:i + batch_size]
+            success = await async_manual_upsert("crypto_market_simulation", batch)
+            if not success:
+                logging.warning(f"⚠️ Failed to upsert batch at {i}")
+                
 
 async def market_updater_background_task():
     """تعمل هذه الدالة في الخلفية لتحديث السوق كل X ثانية"""
