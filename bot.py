@@ -1511,54 +1511,43 @@ async def async_manual_upsert(table_name, records):
             logging.error(f"Supabase Upsert Error: {e}")
             return False
 
-
 async def update_crypto_market_data():
-    # روابط بديلة لا تخضع للحظر الجغرافي (Binance Public Mirrors)
-    endpoints = [
-        "https://api1.binance.com/api/v3/ticker/24hr",
-        "https://api2.binance.com/api/v3/ticker/24hr",
-        "https://api3.binance.com/api/v3/ticker/24hr"
-    ]
+    # الرابط الخاص بك الذي أنشأته في Google Apps Script
+    GOOGLE_BRIDGE_URL = "https://script.google.com/macros/s/AKfycbwe1HVjI_abm3sHJlPBtD8FMyu0mH4ckCZIlRgbSpLS16yb5p5O365UukXiIFLFT0O98w/exec"
     
-    data = None # تعريف أولي لمنع خطأ UnboundLocalError
-    
+    data = None
+    # إضافة allow_redirects=True ضروري جداً لروابط جوجل
     async with aiohttp.ClientSession() as session:
-        for url in endpoints:
-            try:
-                async with session.get(url, timeout=15) as res:
-                    if res.status == 200:
-                        temp_data = await res.json()
-                        if isinstance(temp_data, list):
-                            data = temp_data
-                            break
-                    else:
-                        logging.warning(f"⚠️ الرابط {url} أعاد خطأ {res.status}")
-            except Exception as e:
-                continue
+        try:
+            async with session.get(GOOGLE_BRIDGE_URL, timeout=40, allow_redirects=True) as res:
+                if res.status == 200:
+                    data = await res.json()
+                    logging.info("✅ تم كسر الحظر وجلب بيانات بينانس عبر جسر جوجل!")
+                else:
+                    logging.error(f"⚠️ الجسر أعاد حالة خطأ: {res.status}")
+        except Exception as e:
+            logging.error(f"🚨 فشل الاتصال بالجسر: {e}")
 
-    # 🛡️ صمام الأمان: إذا لم ننجح في جلب البيانات، نخرج بهدوء دون أخطاء
-    if data is None:
-        logging.error("🚨 جميع المحاولات فشلت بسبب الحظر الجغرافي. سيتم التخطي.")
-        return 
+    # التأكد من وجود بيانات قبل البدء في المعالجة
+    if data is None or not isinstance(data, list):
+        return
 
     records = []
     for coin in data:
-        # فحص صارم: هل العنصر قاموس ويحتوي على المفاتيح المطلوبة؟
-        if not isinstance(coin, dict):
-            continue
-            
-        symbol = coin.get('symbol', '')
-        if not symbol.endswith('USDT'):
-            continue
-            
         try:
-            price_str = coin.get('lastPrice', '0')
-            price = float(price_str)
+            symbol = coin.get('symbol', '')
+            # فلترة عملات USDT فقط
+            if not symbol.endswith('USDT'): continue
             
-            if price < 1.0: 
-                continue
-                
+            # سعر العملة
+            price = float(coin.get('lastPrice', 0))
+            
+            # تطبيق شرطك: العملات التي سعرها 1 دولار أو أكثر
+            if price < 1.0: continue
+            
+            # نسبة التغيير والحجم
             change_percent = float(coin.get('priceChangePercent', 0))
+            volume = float(coin.get('volume', 0))
             
             records.append({
                 "symbol": symbol,
@@ -1567,8 +1556,9 @@ async def update_crypto_market_data():
                 "open_price_24h": int(float(coin.get('openPrice', 0))),
                 "high_24h": int(float(coin.get('highPrice', 0))),
                 "low_24h": int(float(coin.get('lowPrice', 0))),
-                "volume_24h": int(float(coin.get('volume', 0))),
+                "volume_24h": int(volume),
                 "change_24h": int(change_percent),
+                # تحديث المؤشرات الفنية الأساسية
                 "ema_20": int(price), 
                 "ema_50": int(price),
                 "rsi_val": 50,
@@ -1577,15 +1567,16 @@ async def update_crypto_market_data():
                 "bb_lower": int(price * 0.98),
                 "last_tick_direction": "UP" if change_percent >= 0 else "DOWN"
             })
-        except (ValueError, TypeError):
+        except:
             continue
 
     if records:
+        # ترتيب حسب حجم التداول
         records.sort(key=lambda x: x['volume_24h'], reverse=True)
-        # الرفع لسوبابيس (Upsert)
-        success = await async_manual_upsert("crypto_market_simulation", records[:100]) # نكتفي بأفضل 100 عملة
+        # تحديث قاعدة البيانات (أفضل 100 عملة تحقق الشرط)
+        success = await async_manual_upsert("crypto_market_simulation", records[:100])
         if success:
-            logging.info(f"✅ تم تحديث {len(records[:100])} عملة بنجاح.")
+            logging.info(f"🚀 تم تحديث {len(records[:100])} عملة في سوبابيس بنجاح.")
             
 async def market_updater_background_task():
     """تعمل هذه الدالة في الخلفية لتحديث السوق كل X ثانية"""
@@ -1593,11 +1584,11 @@ async def market_updater_background_task():
         try:
             await update_crypto_market_data()
             # سينتظر البوت 60 ثانية قبل التحديث القادم (يمكنك تعديلها)
-            await asyncio.sleep(60) 
+            await asyncio.sleep(120) 
         except Exception as e:
             import logging
             logging.error(f"Market Updater Loop Error: {e}")
-            await asyncio.sleep(60) # الانتظار قليلاً في حال حدوث خطأ حتى لا ينهار البوت
+            await asyncio.sleep(120) # الانتظار قليلاً في حال حدوث خطأ حتى لا ينهار البوت
             
 # ==========================================
 # 5. نهاية الملف: نظام الإنعاش الأبدي 24/7 (النبض الذاتي) ⚡
