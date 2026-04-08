@@ -135,44 +135,101 @@ async def get_trading_account_snapshot(user_id):
 
 
 async def trade_reaper():
-    """رادار لمراقبة تصفية الصفقات وانتهاء الوقت"""
+    """رادار بينانس السريع: يعتمد على الكروس مارجن والتصفية اللحظية للسيولة (بدون وقت)"""
     while True:
         try:
-            # جلب الصفقات النشطة فقط
-            active_trades = supabase.table("active_trades").select("*").eq("is_active", True).execute()
+            # 1. جلب الصفقات النشطة فقط
+            trades_res = supabase.table("active_trades").select("*").eq("is_active", True).execute()
+            active_trades = trades_res.data
             
-            for trade in active_trades.data:
-                tid = trade['id']
-                uid = trade['user_id']
-                sym = trade['symbol']
-                side = trade['side']
-                liq_price = float(trade['liquidation_price'])
-                expiry = datetime.fromisoformat(trade['expiry_time'])
-                
-                # جلب السعر الحالي للعملة
-                c_res = supabase.table("crypto_market_simulation").select("current_price").eq("symbol", sym).execute()
-                current_p = float(c_res.data[0]['current_price'])
-                
-                # 1. فحص التصفية (Liquidation)
-                is_liquidated = (side == 'LONG' and current_p <= liq_price) or \
-                                (side == 'SHORT' and current_p >= liq_price)
-                
-                if is_liquidated:
-                    await close_trade_manually(tid, liq_price) # إغلاق بسعر التصفية (صفر ربح)
-                    await bot.send_message(uid, f"💔 <b>تصفية صاعقة!</b>\nتم تصفية صفقتك على #{sym} بسبب وصول السعر إلى {liq_price:,.4f}$", parse_mode="HTML")
-                    continue
+            if not active_trades:
+                await asyncio.sleep(5)
+                continue
 
-                # 2. فحص انتهاء الوقت (Expiration)
-                if datetime.now() > expiry:
-                    success, pnl = await close_trade_manually(tid, current_p)
-                    msg = "💰 ربح" if pnl > 0 else "📉 خسارة"
-                    await bot.send_message(uid, f"⏳ <b>انتهى وقت الصفقة!</b>\nتم إغلاق صفقة #{sym} تلقائياً.\nالنتيجة: {msg} بقيمة {pnl:+.2f}$", parse_mode="HTML")
+            # 2. جلب أسعار السوق لتخفيف الضغط (يسحب كل الأسعار دفعة واحدة)
+            market_res = supabase.table("crypto_market_simulation").select("symbol, current_price").execute()
+            market_prices = {item['symbol']: float(item['current_price']) for item in market_res.data}
+
+            # 3. تجميع صفقات كل مستخدم لتقييم حسابه بالكامل كمحفظة واحدة (Cross Margin)
+            users_trades = {}
+            for t in active_trades:
+                uid = t['user_id']
+                if uid not in users_trades: users_trades[uid] = []
+                users_trades[uid].append(t)
+
+            # 4. فحص المحاسبة لكل مستخدم
+            for uid, trades in users_trades.items():
+                user_res = supabase.table("users_global_profile").select("bank_balance").eq("user_id", uid).execute()
+                if not user_res.data: continue
+                
+                # الكاش المتبقي في حساب التداول
+                bank_balance = float(user_res.data[0]['bank_balance'])
+
+                total_unrealized_pnl = 0.0
+                total_used_margin = 0.0
+                
+                # حساب إجمالي الهوامش والأرباح/الخسائر العائمة لكل صفقات المستخدم
+                for t in trades:
+                    sym = t['symbol']
+                    entry = float(t['entry_price'])
+                    margin = float(t['margin'])
+                    lev = float(t['leverage'])
+                    side = t['side']
+                    current_p = market_prices.get(sym, entry)
+
+                    total_used_margin += margin
+                    pnl_pct = (current_p - entry) / entry if side == 'LONG' else (entry - current_p) / entry
+                    total_unrealized_pnl += (margin * pnl_pct * lev)
+
+                # ⚖️ حساب السيولة الكلية (Equity)
+                # السيولة = الكاش المتبقي + المبالغ المحجوزة في الصفقات + (الربح أو الخسارة الحالية)
+                equity = bank_balance + total_used_margin + total_unrealized_pnl
+
+                # 💀 التصفية الشاملة (Margin Call) - السيناريو الأسوأ
+                # إذا كانت الخسارة من صفقة (أو عدة صفقات) ابتلعت كل السيولة
+                if equity <= 0:
+                    # 1. تصفير رصيد المستخدم تماماً (لا ديون سالبة)
+                    supabase.table("users_global_profile").update({"bank_balance": 0.0}).eq("user_id", uid).execute()
+                    
+                    # 2. إغلاق كافة صفقات هذا المستخدم النشطة فوراً
+                    supabase.table("active_trades").update({"is_active": False}).eq("user_id", uid).eq("is_active", True).execute()
+                    
+                    # 3. إرسال إشعار التصفية
+                    await bot.send_message(
+                        uid, 
+                        "💀 <b>تـصـفـيـة شـامـلـة (Margin Call)!</b>\n"
+                        "خسائرك العائمة ابتلعت رصيدك بالكامل. تمت تصفية حسابك وإغلاق كافة المراكز 💔.", 
+                        parse_mode="HTML"
+                    )
+                    continue # تم تصفير هذا المستخدم، انتقل للمستخدم التالي
+
+                # 🎯 التصفية الفردية
+                # تعمل فقط إذا ضربت صفقة معينة سعر التصفية الخاص بها ولم يكن هناك رصيد كافٍ لحمايتها
+                for t in trades:
+                    tid = t.get('trade_id', t.get('id'))
+                    sym = t['symbol']
+                    side = t['side']
+                    liq_price = float(t['liquidation_price'])
+                    current_p = market_prices.get(sym, float(t['entry_price']))
+
+                    is_liquidated = (side == 'LONG' and current_p <= liq_price) or (side == 'SHORT' and current_p >= liq_price)
+                    
+                    if is_liquidated:
+                        await close_trade_manually(tid, current_p)
+                        await bot.send_message(
+                            uid, 
+                            f"💔 <b>تـصـفـيـة مـركـز: #{sym}!</b>\n"
+                            f"وصل السعر لمستوى التصفية ({liq_price:,.4f}$) وتم إغلاق الصفقة.", 
+                            parse_mode="HTML"
+                        )
 
         except Exception as e:
-            logging.error(f"❌ خطأ في رادار التصفية: {e}")
+            import logging
+            logging.error(f"❌ Reaper Engine Error: {e}")
             
-        await asyncio.sleep(600) # فحص كل 30 ثانية
-                
+        # ⚡ النبض المستمر: الرادار يمسح السوق كل 5 ثوانٍ مثل محركات التداول
+        await asyncio.sleep(5)
+        
 # ==========================================
 # 1. الدوال الحسابية الأساسية (Math Core)
 # ==========================================
@@ -557,6 +614,7 @@ def get_market_keyboard(user_id):
 
     return markup
 
+    
     # ==========================================
 # 3. قوالب واجهات المستخدم المصححة
 # ==========================================
@@ -799,7 +857,7 @@ async def listener_market(message: types.Message):
     user_id = message.from_user.id
     
     # جلب العملات من السوق (Binance Mode)
-    res = supabase.table("crypto_market_simulation").select("*").order("volume_24h", desc=True).limit(5).execute()
+    res = supabase.table("crypto_market_simulation").select("*").order("volume_24h", desc=True).limit(25).execute()
     coins = res.data
     
     text = "📊 | <b>سـوق الـعـمـلات (Binance Mode)</b>\n"
@@ -866,13 +924,13 @@ async def callback_market_tabs(callback_query: types.CallbackQuery):
         
         # جلب البيانات بناءً على التبويب
         if tab_type == 'gainers':
-            res = supabase.table("crypto_market_simulation").select("*").order("change_24h", desc=True).limit(15).execute()
+            res = supabase.table("crypto_market_simulation").select("*").order("change_24h", desc=True).limit(25).execute()
             header = "📈 <b>الأعلى ربحاً (24h):</b>"
         elif tab_type == 'losers':
-            res = supabase.table("crypto_market_simulation").select("*").order("change_24h", desc=False).limit(15).execute()
+            res = supabase.table("crypto_market_simulation").select("*").order("change_24h", desc=False).limit(25).execute()
             header = "📉 <b>الأكثر خسارة (24h):</b>"
         else: # trending
-            res = supabase.table("crypto_market_simulation").select("*").order("volume_24h", desc=True).limit(15).execute()
+            res = supabase.table("crypto_market_simulation").select("*").order("volume_24h", desc=True).limit(25).execute()
             header = "🔥 <b>الأكثر رواجاً (السيولة):</b>"
             
         if not res.data:
@@ -927,7 +985,7 @@ async def callback_view_trades(callback_query: types.CallbackQuery):
         trades, text = await get_active_trades_report(user_id)
         
         # دالة حذف الرسالة في الخلفية
-        async def delete_message_later(msg, delay=300):
+        async def delete_message_later(msg, delay=600):
             await asyncio.sleep(delay)
             try:
                 await msg.delete()
@@ -948,7 +1006,7 @@ async def callback_view_trades(callback_query: types.CallbackQuery):
             )
             
         # تشغيل المؤقت (5 دقائق = 300 ثانية)
-        asyncio.create_task(delete_message_later(callback_query.message, 300))
+        asyncio.create_task(delete_message_later(callback_query.message, 600))
         
     except Exception as e:
         logging.error(f"Callback View Error: {e}")
@@ -1442,7 +1500,7 @@ async def universal_execution_engine(callback_query: types.CallbackQuery):
             success_text += f"• العائد للبنك: <b>{ret_to_bank:,.2f} $</b>"
 
             msg = await callback_query.message.edit_text(success_text, parse_mode="HTML")
-            await asyncio.sleep(4)
+            await asyncio.sleep(10)
             try: await msg.delete()
             except: pass
 
