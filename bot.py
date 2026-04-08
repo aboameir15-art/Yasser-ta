@@ -309,7 +309,6 @@ def get_trade_settings_view(trade, current_price, expand_section=None):
     if not expand_section:
         markup.add(
             InlineKeyboardButton("✂️ إغلاق جزئي", callback_data=f"exp_cl_{u_id}_{t_id}"),
-            InlineKeyboardButton("🚀 تعزيز (DCA)", callback_data=f"exp_dca_{u_id}_{t_id}"),
             InlineKeyboardButton("🎯 أهداف الربح والخسارة", callback_data=f"exp_risk_{u_id}_{t_id}"),
             InlineKeyboardButton("🔙 العودة", callback_data=f"active_trades_view:{u_id}")
         )
@@ -322,15 +321,7 @@ def get_trade_settings_view(trade, current_price, expand_section=None):
         markup.add(InlineKeyboardButton("🛑 إغلاق 100% (تأكيد)", callback_data=f"conf_cl_100_{u_id}_{t_id}"))
         markup.add(InlineKeyboardButton("🔙 رجوع", callback_data=f"manage_trade:{t_id}"))
 
-    elif expand_section == "dca":
-        text += "\n<b>🚀 اختر نسبة التعزيز من السيولة الكلية:</b>"
-        # أزرار نسب التعزيز (المرور عبر بوابة التأكيد conf_)
-        btns = [InlineKeyboardButton(f"{p}%", callback_data=f"conf_dca_{p}_{u_id}_{t_id}") for p in [5, 10, 25, 50, 75]]
-        markup.row(*btns)
-        markup.add(InlineKeyboardButton("🔥 تعزيز 100% (تأكيد)", callback_data=f"conf_dca_100_{u_id}_{t_id}"))
-        markup.add(InlineKeyboardButton("🔙 رجوع", callback_data=f"manage_trade:{t_id}"))
-
-
+    
     elif expand_section == "risk":
         side = trade['side']
         lev = int(trade['leverage'])
@@ -353,11 +344,11 @@ def get_trade_settings_view(trade, current_price, expand_section=None):
         
         if is_in_profit:
             targets = [
-                (entry, "دخول 🛡️"),
+                (entry, "مكان الدخول"),
                 (calc_price(entry, 0.10, True, side, lev), "تأمين +10%"), 
-                (calc_price(c_price, 0.05, False, side, lev), "ملاحقة -5%"), 
-                (calc_price(c_price, 0.15, False, side, lev), "ملاحقة -15%"),
-                (calc_price(c_price, 0.25, False, side, lev), "ملاحقة -25%")
+                (calc_price(c_price, 0.05, False, side, lev), "تأمين +5%"), 
+                (calc_price(c_price, 0.15, False, side, lev), "تأمين +15%"),
+                (calc_price(c_price, 0.25, False, side, lev), "تأمين +25%")
             ]
         else:
             loss_step = net_balance * 0.20 
@@ -385,7 +376,7 @@ def get_trade_settings_view(trade, current_price, expand_section=None):
             (5.00, "L1 +500%"), (10.00, "L2 +1000%"), (20.00, "L3 +2000%")
         ]
 
-        text += "\n\n<b>💰 أهداف جني الأرباح (6 مراحل):</b>"
+        text += "\n\n<b>💰 أهداف جني الأرباح (متوسط و طويل):</b>"
         tp_row1, tp_row2, tp_row3 = [], [], []
         for i, (roe, label) in enumerate(tp_levels):
             opt_val = calc_price(entry, roe, True, side, lev)
@@ -466,7 +457,8 @@ def get_market_keyboard(user_id):
     markup.add(InlineKeyboardButton("📋 صفقاتي المفتوحة", callback_data=f"active_trades_view:{user_id}"))
 
     return markup
- # ==========================================
+
+    # ==========================================
 # 3. قوالب واجهات المستخدم المصححة
 # ==========================================
 async def is_authorized(callback_query: types.CallbackQuery):
@@ -875,11 +867,11 @@ async def process_coin_view(callback_query: types.CallbackQuery):
     text += f"📉 نـسـبـة 24س: {float(coin['change_24h']):+.2f}%\n"
     text += "━━━━━━━━━━━━━━━━━━\n"
     text += f"📊 <b>الـمـؤشـرات الـفـنـيـة (Live):</b>\n"
-    text += f"• <b>EMA 50:</b> {ema50:,.4f} ({ema_status})\n"
+    text += f"• <b>EMA 50:</b> {ema50:,.2f} ({ema_status})\n"
     text += f"• <b>RSI (78/22):</b> {rsi:.1f} ({rsi_status})\n"
     text += f"• <b>Bollinger MID:</b> {float(coin.get('bb_middle', price)):,.4f}\n"
-    text += f"   - المقاومة (أصفر): {bb_upper:,.4f}\n"
-    text += f"   - الدعم (أصفر): {bb_lower:,.4f}\n\n"
+    text += f"   - المقاومة (أصفر): {bb_upper:,.2f}\n"
+    text += f"   - الدعم (أصفر): {bb_lower:,.2f}\n\n"
     text += f"شكل الشمعة الحالية:\n{generate_candle_chart(direction)}\n"
     text += "━━━━━━━━━━━━━━━━━━\n"
     text += "اختر إجراء التداول الآن 👇:"
@@ -1110,7 +1102,7 @@ async def handle_expansion_protected(callback_query: types.CallbackQuery):
         data = callback_query.data.split('_') 
         section = data[1]
         btn_user_id = int(data[2])
-        t_id = data[3]
+        t_id = data[3]        
         
         if callback_query.from_user.id != btn_user_id:
             return await callback_query.answer("⚠️ مبعسس! هذه الأزرار ليست لك. 🚫", show_alert=True)
@@ -1156,7 +1148,10 @@ async def callback_manage_trade_handler(callback_query: types.CallbackQuery):
         await callback_query.answer()
     except Exception as e:
         await callback_query.answer("❌ خطأ في فتح الإعدادات.")
-
+    
+ # ==========================================
+# --- [ بوابة تأكيد التنفيذ ] ---
+# ==========================================
 @dp.callback_query_handler(Text(startswith='conf_'), state="*")
 async def security_gate_protected(callback_query: types.CallbackQuery):
     try:
@@ -1172,9 +1167,9 @@ async def security_gate_protected(callback_query: types.CallbackQuery):
             return await callback_query.message.edit_text("⚠️ الصفقة مغلقة أو غير موجودة.")
         
         symbol = res.data[0]['symbol']
-        act_name = "إغلاق جزء من المركز" if action == 'cl' else "تعزيز المركز (DCA)"
-        if percent == "100":
-            act_name = "إغلاق المركز بالكامل" if action == 'cl' else "تعزيز بكامل السيولة"
+        
+        # تحديد نوع الإغلاق
+        act_name = "إغلاق جزء من المركز" if percent != "100" else "إغلاق المركز بالكامل"
         
         text = f"🛡️ <b>تأكيـد التنفيذ: #{symbol}</b>\n"
         text += f"━━━━━━━━━━━━━━━━━━\n"
@@ -1195,8 +1190,9 @@ async def security_gate_protected(callback_query: types.CallbackQuery):
         logging.error(f"Security Gate Error: {e}")
         await callback_query.answer("❌ خطأ في بوابة التأكيد.")
 
+
 # ==========================================
-# --- [ محرك التنفيذ الموحد: Binance Standard ] ---
+# --- [ محرك التنفيذ الموحد: الإغلاق فقط ] ---
 # ==========================================
 @dp.callback_query_handler(Text(startswith='exe_'), state="*")
 async def universal_execution_engine(callback_query: types.CallbackQuery):
@@ -1204,7 +1200,10 @@ async def universal_execution_engine(callback_query: types.CallbackQuery):
         _, action, percent, u_id, t_id = callback_query.data.split('_')
         percent, user_id = int(percent), int(u_id)
 
-        # جلب بيانات الحساب الشاملة من الدالة الجديدة
+        if callback_query.from_user.id != user_id:
+            return await callback_query.answer("⚠️ لا تتدخل في صفقات غيرك!", show_alert=True)
+
+        # جلب الكاش من الدالة الشاملة
         account = await get_trading_account_snapshot(user_id)
         
         # جلب بيانات الصفقة الحالية
@@ -1217,11 +1216,12 @@ async def universal_execution_engine(callback_query: types.CallbackQuery):
         
         success_text = ""
 
-        # --- [ وضع الإغلاق الكلي والجزئي ] ---
+        # --- [ وضع الإغلاق الكلي والجزئي فقط ] ---
         if action == 'cl':
             m_to_close = int(trade['margin'] * (percent / 100))
             q_to_close = int(trade['quantity'] * (percent / 100))
             
+            # حساب PNL
             pnl_pct = (cur_price - trade['entry_price']) / trade['entry_price'] if trade['side'] == 'LONG' else (trade['entry_price'] - cur_price) / trade['entry_price']
             pnl_amt = int(m_to_close * pnl_pct * trade['leverage'])
             ret_to_bank = m_to_close + pnl_amt
@@ -1246,52 +1246,27 @@ async def universal_execution_engine(callback_query: types.CallbackQuery):
             success_text += f"• سعر الدخول: <b>{trade['entry_price']:,}</b>\n• سعر الإغلاق: <b>{cur_price:,}</b>\n"
             success_text += f"• الربح/الخسارة: <b>{pnl_amt:,} $</b> {pnl_emoji}\n• العائد للبنك: <b>{ret_to_bank:,} $</b>"
 
-        # --- [ وضع التعزيز DCA ] ---
-        elif action == 'dca':
-            # نستخدم available_equity (المتبقي الفعلي بعد حساب الأرباح والخسائر العائمة)
-            dca_amt = int(account['available_equity'] * (percent / 100))
-            
-            if dca_amt < 1:
-                return await callback_query.answer("❌ لا يوجد سيولة كافية للتعزيز بناءً على وضع محفظتك الحالي!", show_alert=True)
+            # إظهار النتيجة ثم التنظيف بعد 4 ثوانٍ
+            msg = await callback_query.message.edit_text(success_text, parse_mode="HTML")
+            await asyncio.sleep(4)
+            await msg.delete()
 
-            # معادلة تحريك السعر (Weighted Average)
-            new_q_added = int((dca_amt * trade['leverage']) / cur_price)
-            total_q = int(trade['quantity']) + new_q_added
-            
-            # (الكمية القديمة * سعر الدخول القديم + الكمية الجديدة * السعر الحالي) / الكمية الكلية
-            new_entry = int(((int(trade['quantity']) * int(trade['entry_price'])) + (new_q_added * cur_price)) / total_q)
-
-            # الخصم من الكاش وتحديث الصفقة
-            supabase.table("users_global_profile").update({"bank_balance": max(0, account['free_cash'] - dca_amt)}).eq("user_id", user_id).execute()
-            supabase.table("active_trades").update({
-                "margin": int(trade['margin']) + dca_amt,
-                "quantity": total_q,
-                "entry_price": new_entry
-            }).eq("trade_id", t_id).execute()
-
-            success_text = f"🚀 <b>تعزيز المركز (DCA): #{trade['symbol']}</b>\n"
-            success_text += f"• السعر القديم: <b>{trade['entry_price']:,}</b>\n• المبلغ المضاف: <b>{dca_amt:,} $</b>\n"
-            success_text += f"🎯 <b>متوسط الدخول الجديد: {new_entry:,}</b>\n• إجمالي الكمية: <b>{total_q:,}</b>"
-
-        # إظهار النتيجة ثم التنظيف بعد 4 ثوانٍ
-        msg = await callback_query.message.edit_text(success_text, parse_mode="HTML")
-        await asyncio.sleep(4)
-        await msg.delete()
-
-        # العودة للقائمة المناسبة
-        trades_left = supabase.table("active_trades").select("trade_id").eq("user_id", user_id).execute()
-        if not trades_left.data:
-            from bot_handlers import send_main_portfolio
-            await send_main_portfolio(callback_query.message, user_id)
-        else:
-            callback_query.data = f"active_trades_view:{user_id}"
-            from bot_handlers import callback_view_trades
-            await callback_view_trades(callback_query)
+            # العودة للقائمة المناسبة
+            trades_left = supabase.table("active_trades").select("trade_id").eq("user_id", user_id).execute()
+            if not trades_left.data:
+                from bot_handlers import send_main_portfolio
+                await send_main_portfolio(callback_query.message, user_id)
+            else:
+                callback_query.data = f"active_trades_view:{user_id}"
+                from bot_handlers import callback_view_trades
+                await callback_view_trades(callback_query)
 
     except Exception as e:
+        import logging
         logging.error(f"Logic Error: {e}")
         await callback_query.answer("❌ حدث خطأ في الحسابات.")
         
+    
 # ==========================================
 # 9. زر العودة للوحة التحكم الرئيسية للصفقة (Back Button)
 # ==========================================
