@@ -1,7 +1,7 @@
 import requests
 import json
 
-# --- [ بيانات سوبابيس ] ---
+# --- [ بيانات سوبابيس الخاصة بك ] ---
 SUPABASE_URL = "https://snlcbtgzdxsacwjipggn.supabase.co" 
 SUPABASE_KEY = "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6InNubGNidGd6ZHhzYWN3amlwZ2duIiwicm9sZSI6InNlcnZpY2Vfcm9sZSIsImlhdCI6MTc3MDU3NDMzMiwiZXhwIjoyMDg2MTUwMzMyfQ.v3SRkONLNlQw5LWhjo03u0fDce3EvWGBpJ02OGg5DEI"
 
@@ -20,32 +20,36 @@ def manual_upsert(table_name, records):
         return False
 
 def populate_crypto_table():
-    print("⏳ جاري سحب البيانات من بينانس...")
+    print("⏳ جاري محاولة جلب البيانات عبر واجهة بديلة (تجاوز الحظر)...")
     
-    binance_url = "https://api.binance.com/api/v3/ticker/24hr"
-    # إضافة Headers لمحاكاة متصفح ومنع الحظر في GitHub
-    headers_binance = {
-        "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/91.0.4472.124 Safari/537.36"
-    }
+    # قائمة بروابط بديلة لبينانس، إذا فشل واحد ينتقل للآخر
+    endpoints = [
+        "https://api1.binance.com/api/v3/ticker/24hr",
+        "https://api2.binance.com/api/v3/ticker/24hr",
+        "https://api3.binance.com/api/v3/ticker/24hr",
+        "https://data-api.binance.vision/api/v3/ticker/24hr" # هذا الرابط مخصص للداتا وغالباً لا يحظر
+    ]
     
-    try:
-        res = requests.get(binance_url, headers=headers_binance, timeout=30)
-        data = res.json()
-        
-        # التأكد أن البيانات قائمة وليست رسالة خطأ
-        if not isinstance(data, list):
-            print(f"❌ خطأ من بينانس: {data}")
-            return
+    data = None
+    for url in endpoints:
+        try:
+            print(f"🔄 محاولة الاتصال بـ: {url}")
+            res = requests.get(url, timeout=20, headers={"User-Agent": "Mozilla/5.0"})
+            if res.status_code == 200:
+                data = res.json()
+                print("✅ نجح الاتصال!")
+                break
+        except:
+            continue
 
-    except Exception as e:
-        print(f"❌ خطأ في الاتصال: {e}")
+    if not data or not isinstance(data, list):
+        print("❌ جميع الروابط محظورة حالياً من قبل بينانس لسيرفرات جيت هاب.")
         return
 
-    # تصفية العملات
     records = []
     for coin in data:
         try:
-            symbol = coin.get('symbol', '')
+            symbol = coin['symbol']
             if not symbol.endswith('USDT'): continue
             
             price = float(coin['lastPrice'])
@@ -77,10 +81,9 @@ def populate_crypto_table():
         return
 
     records.sort(key=lambda x: x['volume_24h'], reverse=True)
-    print(f"🚀 تم تجهيز {len(records)} عملة. جاري الرفع...")
+    print(f"🚀 تم تجهيز {len(records)} عملة. جاري الرفع لسوبابيس...")
     
-    # الرفع بنظام الدفعات
-    batch_size = 30
+    batch_size = 25
     for i in range(0, len(records), batch_size):
         batch = records[i:i + batch_size]
         manual_upsert("crypto_market_simulation", batch)
