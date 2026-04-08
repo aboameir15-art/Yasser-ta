@@ -1511,73 +1511,44 @@ async def async_manual_upsert(table_name, records):
             logging.error(f"Supabase Upsert Error: {e}")
             return False
 
+import ccxt.async_support as ccxt
+
 async def update_crypto_market_data():
-    # الرابط الخاص بك الذي أنشأته في Google Apps Script
-    GOOGLE_BRIDGE_URL = "https://script.google.com/macros/s/AKfycbwe1HVjI_abm3sHJlPBtD8FMyu0mH4ckCZIlRgbSpLS16yb5p5O365UukXiIFLFT0O98w/exec"
+    exchange = ccxt.binance({
+        'enableRateLimit': True,
+        'options': {'defaultType': 'spot'}
+    })
     
-    data = None
-    # إضافة allow_redirects=True ضروري جداً لروابط جوجل
-    async with aiohttp.ClientSession() as session:
-        try:
-            async with session.get(GOOGLE_BRIDGE_URL, timeout=40, allow_redirects=True) as res:
-                if res.status == 200:
-                    data = await res.json()
-                    logging.info("✅ تم كسر الحظر وجلب بيانات بينانس عبر جسر جوجل!")
-                else:
-                    logging.error(f"⚠️ الجسر أعاد حالة خطأ: {res.status}")
-        except Exception as e:
-            logging.error(f"🚨 فشل الاتصال بالجسر: {e}")
-
-    # التأكد من وجود بيانات قبل البدء في المعالجة
-    if data is None or not isinstance(data, list):
-        return
-
-    records = []
-    for coin in data:
-        try:
-            symbol = coin.get('symbol', '')
-            # فلترة عملات USDT فقط
-            if not symbol.endswith('USDT'): continue
+    try:
+        # هذه الدالة في ccxt تجلب كل الأسعار وتتعامل مع الحظر بشكل أفضل
+        tickers = await exchange.fetch_tickers()
+        await exchange.close() # إغلاق الاتصال بأمان
+        
+        records = []
+        for symbol, data in tickers.items():
+            if not symbol.endswith('/USDT'): continue
             
-            # سعر العملة
-            price = float(coin.get('lastPrice', 0))
-            
-            # تطبيق شرطك: العملات التي سعرها 1 دولار أو أكثر
-            if price < 1.0: continue
-            
-            # نسبة التغيير والحجم
-            change_percent = float(coin.get('priceChangePercent', 0))
-            volume = float(coin.get('volume', 0))
+            price = data['last']
+            if price is None or price < 1.0: continue
             
             records.append({
-                "symbol": symbol,
-                "name": symbol.replace("USDT", ""),
-                "current_price": int(price), 
-                "open_price_24h": int(float(coin.get('openPrice', 0))),
-                "high_24h": int(float(coin.get('highPrice', 0))),
-                "low_24h": int(float(coin.get('lowPrice', 0))),
-                "volume_24h": int(volume),
-                "change_24h": int(change_percent),
-                # تحديث المؤشرات الفنية الأساسية
-                "ema_20": int(price), 
-                "ema_50": int(price),
-                "rsi_val": 50,
-                "bb_upper": int(price * 1.02),
-                "bb_middle": int(price),
-                "bb_lower": int(price * 0.98),
-                "last_tick_direction": "UP" if change_percent >= 0 else "DOWN"
+                "symbol": symbol.replace("/", ""),
+                "name": symbol.split("/")[0],
+                "current_price": int(price),
+                "volume_24h": int(data['quoteVolume']),
+                "change_24h": int(data['percentage']),
+                "last_tick_direction": "UP" if data['percentage'] >= 0 else "DOWN"
             })
-        except:
-            continue
-
-    if records:
-        # ترتيب حسب حجم التداول
-        records.sort(key=lambda x: x['volume_24h'], reverse=True)
-        # تحديث قاعدة البيانات (أفضل 100 عملة تحقق الشرط)
-        success = await async_manual_upsert("crypto_market_simulation", records[:100])
-        if success:
-            logging.info(f"🚀 تم تحديث {len(records[:100])} عملة في سوبابيس بنجاح.")
             
+        if records:
+            records.sort(key=lambda x: x['volume_24h'], reverse=True)
+            await async_manual_upsert("crypto_market_simulation", records[:100])
+            print("✅ النجاح تحقق أخيراً عبر CCXT!")
+            
+    except Exception as e:
+        await exchange.close()
+        print(f"🚨 حتى CCXT واجه مشكلة: {e}")
+        
 async def market_updater_background_task():
     """تعمل هذه الدالة في الخلفية لتحديث السوق كل X ثانية"""
     while True:
