@@ -1,8 +1,7 @@
 import requests
 import json
-import os
 
-# --- [ بيانات سوبابيس ] ---
+# --- [ بيانات سوبابيس الخاصة بك ] ---
 SUPABASE_URL = "https://snlcbtgzdxsacwjipggn.supabase.co" 
 SUPABASE_KEY = "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6InNubGNidGd6ZHhzYWN3amlwZ2duIiwicm9sZSI6InNlcnZpY2Vfcm9sZSIsImlhdCI6MTc3MDU3NDMzMiwiZXhwIjoyMDg2MTUwMzMyfQ.v3SRkONLNlQw5LWhjo03u0fDce3EvWGBpJ02OGg5DEI"
 
@@ -16,11 +15,8 @@ def manual_upsert(table_name, records):
     endpoint = f"{SUPABASE_URL}/rest/v1/{table_name}"
     try:
         response = requests.post(endpoint, json=records, headers=headers, timeout=60)
-        if response.status_code not in [200, 201]:
-            print(f"❌ فشل في سوبابيس: {response.status_code} - {response.text}")
         return response.status_code in [200, 201]
-    except Exception as e:
-        print(f"❌ خطأ في الإرسال: {e}")
+    except:
         return False
 
 def populate_crypto_table():
@@ -31,8 +27,7 @@ def populate_crypto_table():
         res = requests.get(binance_url, timeout=30)
         data = res.json()
     except Exception as e:
-        print(f"❌ خطأ في الاتصال ببينانس: {e}")
-        # إذا فشل الاتصال ببينانس، نجعل السيرفر يخرج بسلام بدلاً من Error
+        print(f"❌ خطأ: {e}")
         return
 
     usdt_pairs = [coin for coin in data if coin['symbol'].endswith('USDT')]
@@ -46,7 +41,6 @@ def populate_crypto_table():
                 
             change_percent = float(coin['priceChangePercent'])
             
-            # نفس منطق كودك الشغال 100%
             records.append({
                 "symbol": coin['symbol'],
                 "name": coin['symbol'].replace("USDT", ""),
@@ -76,7 +70,7 @@ def populate_crypto_table():
         batch = records[i:i + batch_size]
         manual_upsert("crypto_market_simulation", batch)
 
-    print(f"\n🎉 انتهت المهمة بنجاح!")
+    print(f"\n🎉 تم التحديث بنجاح!")
 
 if __name__ == "__main__":
     populate_crypto_table()
