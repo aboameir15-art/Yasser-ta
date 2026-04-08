@@ -1512,27 +1512,22 @@ async def async_manual_upsert(table_name, records):
             return False
 
 async def update_crypto_market_data():
-    # نستخدم وسيطاً يغير الـ IP تلقائياً
-    gateways = [
-        "https://api.allorigins.win/get?url=",
-        "https://thingproxy.freeboard.io/fetch/"
-    ]
-    target = "https://api.binance.com/api/v3/ticker/24hr"
-    
+    # هنا تضع عنوان البروكسي (دولة غير محظورة مثل ألمانيا أو بريطانيا)
+    # يمكنك الحصول على بروكسي مدفوع أو تجريبي
+    proxy_url = "http://username:password@proxy_address:port" 
+    target_url = "https://api.binance.com/api/v3/ticker/24hr"
+
     async with aiohttp.ClientSession() as session:
         try:
-            # ندمج الرابطين معاً لكسر الحظر
-            async with session.get(f"{gateways[0]}{target}", timeout=30) as res:
-                resp = await res.json()
-                # ملاحظة: بعض الوسائط تعيد البيانات داخل حقل نصي اسمه 'contents'
-                import json
-                data = json.loads(resp['contents']) if 'contents' in resp else resp
-                
-                if isinstance(data, list):
-                    logging.info("✅ تم كسر الحظر بنجاح وجلب البيانات!")
-                    # هنا نرفع البيانات لسوبابيس
+            # نمرر البروكسي هنا لكي يظن بينانس أننا في دولة أخرى
+            async with session.get(target_url, proxy=proxy_url, timeout=20) as res:
+                if res.status == 200:
+                    data = await res.json()
+                    # استكمال المعالجة...
+                else:
+                    logging.error(f"⚠️ حتى مع البروكسي الاستجابة: {res.status}")
         except Exception as e:
-            logging.error(f"🚨 فشل كسر الحظر بالوسيط: {e}")
+            logging.error(f"❌ فشل الاتصال عبر البروكسي: {e}")
             
     # إذا فشلت جميع المحاولات أو كانت البيانات ليست قائمة
     if not data or not isinstance(data, list):
