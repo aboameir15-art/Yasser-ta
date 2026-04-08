@@ -1,79 +1,87 @@
 import requests
+import json
 import os
 
-# بيانات سوبابيس الخاصة بك
+# --- [ بيانات سوبابيس الخاصة بك ] ---
 SUPABASE_URL = "https://snlcbtgzdxsacwjipggn.supabase.co" 
 SUPABASE_KEY = "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6InNubGNidGd6ZHhzYWN3amlwZ2duIiwicm9sZSI6InNlcnZpY2Vfcm9sZSIsImlhdCI6MTc3MDU3NDMzMiwiZXhwIjoyMDg2MTUwMzMyfQ.v3SRkONLNlQw5LWhjo03u0fDce3EvWGBpJ02OGg5DEI"
 
-def update_prices():
-    print("⏳ جاري سحب البيانات من بينانس...")
+def manual_upsert(table_name, records):
+    headers = {
+        "apikey": SUPABASE_KEY,
+        "Authorization": f"Bearer {SUPABASE_KEY}",
+        "Content-Type": "application/json",
+        "Prefer": "resolution=merge-duplicates"
+    }
+    endpoint = f"{SUPABASE_URL}/rest/v1/{table_name}"
     try:
-        # استخدام رابط API بينانس للأسعار خلال 24 ساعة
-        res = requests.get("https://api.binance.com/api/v3/ticker/24hr", timeout=30)
+        # إرسال البيانات دفعة واحدة لضمان السرعة ومنع التكرار
+        response = requests.post(endpoint, json=records, headers=headers, timeout=60)
+        return response.status_code in [200, 201]
+    except:
+        return False
+
+def populate_crypto_table():
+    print("⏳ جاري سحب البيانات من بينانس وفلترة العملات (> 1$)...")
+    
+    binance_url = "https://api.binance.com/api/v3/ticker/24hr"
+    try:
+        res = requests.get(binance_url, timeout=30)
         data = res.json()
     except Exception as e:
-        print(f"❌ خطأ في الاتصال ببينانس: {e}")
+        print(f"❌ خطأ: {e}")
         return
 
+    # فلترة عملات USDT فقط كما في كودك تماماً
+    usdt_pairs = [coin for coin in data if coin['symbol'].endswith('USDT')]
+    
     records = []
-    for coin in data:
-        symbol = coin['symbol']
-        if not symbol.endswith('USDT'): continue
-        
+    for coin in usdt_pairs:
         try:
             price = float(coin['lastPrice'])
             
-            # 🔥 شرطك الأساسي: العملات التي سعرها 1 دولار أو أكثر
+            # 🔥 شرطك الأساسي: فوق الـ 1 دولار
             if price < 1.0: 
                 continue
                 
             change_percent = float(coin['priceChangePercent'])
             
-            # بناء السجل بناءً على أعمدة جدولك
+            # نفس الأعمدة والتحويل لـ int اللي شغال عندك 100%
             records.append({
-                "symbol": symbol,
-                "name": symbol.replace("USDT", ""),
-                "current_price": price, 
-                "open_price_24h": float(coin['openPrice']),
-                "high_24h": float(coin['highPrice']),
-                "low_24h": float(coin['lowPrice']),
-                "volume_24h": float(coin['volume']),
-                "change_24h": change_percent,
-                "ema_20": price, 
-                "ema_50": price,
-                "rsi_val": 50.0,
-                "bb_upper": price * 1.02,
-                "bb_middle": price,
-                "bb_lower": price * 0.98,
+                "symbol": coin['symbol'],
+                "name": coin['symbol'].replace("USDT", ""),
+                "current_price": int(price), 
+                "open_price_24h": int(float(coin['openPrice'])),
+                "high_24h": int(float(coin['highPrice'])),
+                "low_24h": int(float(coin['lowPrice'])),
+                "volume_24h": int(float(coin['volume'])),
+                "change_24h": int(change_percent),
+                "ema_20": int(price), 
+                "ema_50": int(price),
+                "rsi_val": 50,
+                "bb_upper": int(price * 1.02),
+                "bb_middle": int(price),
+                "bb_lower": int(price * 0.98),
                 "last_tick_direction": "UP" if change_percent >= 0 else "DOWN"
             })
         except: continue
 
-    if not records:
-        print("⚠️ لم يتم العثور على عملات تطابق شرط الـ 1 دولار.")
-        return
-
-    print(f"🚀 تم تجهيز {len(records)} عملة. جاري التحديث في سوبابيس...")
-
-    headers = {
-        "apikey": SUPABASE_KEY,
-        "Authorization": f"Bearer {SUPABASE_KEY}",
-        "Content-Type": "application/json",
-        # 🔥 هذا السطر يضمن التحديث بناءً على الـ symbol ومنع التكرار
-        "Prefer": "resolution=merge-duplicates"
-    }
+    # الترتيب حسب الحجم لنأخذ الأهم
+    records.sort(key=lambda x: x['volume_24h'], reverse=True)
     
-    endpoint = f"{SUPABASE_URL}/rest/v1/crypto_market_simulation"
+    total_to_upload = len(records)
+    print(f"🚀 تم العثور على {total_to_upload} عملة. جاري الرفع بنظامك القديم...")
     
-    try:
-        response = requests.post(endpoint, json=records, headers=headers)
-        if response.status_code in [200, 201]:
-            print("✅ تم التحديث بنجاح! اذهب وتحقق من الجدول الآن.")
+    # الرفع بنظام الدفعات لضمان عدم حدوث Timeout
+    batch_size = 30
+    for i in range(0, total_to_upload, batch_size):
+        batch = records[i:i + batch_size]
+        if manual_upsert("crypto_market_simulation", batch):
+            print(f"✅ تم تحديث الدفعة: {min(i + batch_size, total_to_upload)} / {total_to_upload}")
         else:
-            print(f"❌ فشل التحديث. كود الخطأ: {response.status_code}")
-            print(f"📝 السبب: {response.text}")
-    except Exception as e:
-        print(f"❌ خطأ غير متوقع: {e}")
+            print(f"⚠️ فشل في الدفعة رقم {i}")
+
+    print(f"\n🎉 انتهى التحديث! بياناتك الآن في سوبابيس (بجدولك القديم وبنفس الطريقة).")
 
 if __name__ == "__main__":
-    update_prices()
+    populate_crypto_table()
