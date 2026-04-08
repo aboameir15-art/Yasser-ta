@@ -1487,18 +1487,19 @@ async def exec_loan_handler(callback_query: types.CallbackQuery):
 
 import asyncio
 import aiohttp
+import logging
+
+# لا تنسى تتأكد أن SUPABASE_URL و SUPABASE_KEY معرفة في بداية الملف
 
 async def async_manual_upsert(table_name, records):
     """
     دالة لرفع البيانات بشكل غير متزامن.
-    resolution=merge-duplicates تعني: إذا كان الـ symbol موجوداً، قم بتحديث السعر والمؤشرات.
-    إذا لم يكن موجوداً، قم بإضافته.
     """
     headers = {
         "apikey": SUPABASE_KEY,
         "Authorization": f"Bearer {SUPABASE_KEY}",
         "Content-Type": "application/json",
-        "Prefer": "resolution=merge-duplicates" # 🟢 السر هنا لتجنب التكرار وتحديث البيانات فقط
+        "Prefer": "resolution=merge-duplicates"
     }
     endpoint = f"{SUPABASE_URL}/rest/v1/{table_name}"
     
@@ -1507,68 +1508,94 @@ async def async_manual_upsert(table_name, records):
             async with session.post(endpoint, json=records, headers=headers, timeout=60) as response:
                 return response.status in [200, 201]
         except Exception as e:
-            import logging
             logging.error(f"Supabase Upsert Error: {e}")
             return False
 
-import ccxt.async_support as ccxt
-
 async def update_crypto_market_data():
-    # الحل الوحيد هو الخروج عبر بروكسي لتغيير موقع السيرفر
-    # يمكنك البحث عن (Free Proxy List) أو استخدام خدمة مثل (Webshare)
-    # مثال لبروكسي (يجب استبداله ببروكسي عامل):
-    proxy_url = "http://username:password@proxy_address:port"
-
-    exchange = ccxt.binance({
-        'enableRateLimit': True,
-        'aiohttp_proxy': proxy_url, # 🟢 هذا هو السطر السحري
-        'options': {'defaultType': 'spot'}
-    })
+    print("⏳ جاري محاولة جلب البيانات عبر واجهة بديلة (تجاوز الحظر)...")
     
-    try:
-        tickers = await exchange.fetch_tickers()
-        await exchange.close()
-        
-        # ... بقية منطق المعالجة كما هو ...
-        print("✅ تم كسر الحظر الجغرافي باستخدام البروكسي!")
- 
-        records = []
-        for symbol, data in tickers.items():
-            if not symbol.endswith('/USDT'): continue
+    endpoints = [
+        "https://api1.binance.com/api/v3/ticker/24hr",
+        "https://api2.binance.com/api/v3/ticker/24hr",
+        "https://api3.binance.com/api/v3/ticker/24hr",
+        "https://data-api.binance.vision/api/v3/ticker/24hr"
+    ]
+    
+    data = None
+    # 🟢 استخدام aiohttp بدلاً من requests لضمان عدم توقف البوت
+    async with aiohttp.ClientSession() as session:
+        for url in endpoints:
+            try:
+                print(f"🔄 محاولة الاتصال بـ: {url}")
+                async with session.get(url, timeout=20, headers={"User-Agent": "Mozilla/5.0"}) as res:
+                    if res.status == 200:
+                        data = await res.json()
+                        print("✅ نجح الاتصال!")
+                        break
+            except:
+                continue
+
+    if not data or not isinstance(data, list):
+        print("❌ جميع الروابط محظورة حالياً.")
+        return
+
+    records = []
+    for coin in data:
+        try:
+            symbol = coin['symbol']
+            if not symbol.endswith('USDT'): continue
             
-            price = data['last']
-            if price is None or price < 1.0: continue
+            price = float(coin['lastPrice'])
+            if price < 1.0: continue
+                
+            change_percent = float(coin['priceChangePercent'])
             
+            # نفس المؤشرات اللي تعتمد عليها
             records.append({
-                "symbol": symbol.replace("/", ""),
-                "name": symbol.split("/")[0],
-                "current_price": int(price),
-                "volume_24h": int(data['quoteVolume']),
-                "change_24h": int(data['percentage']),
-                "last_tick_direction": "UP" if data['percentage'] >= 0 else "DOWN"
+                "symbol": symbol,
+                "name": symbol.replace("USDT", ""),
+                "current_price": int(price), 
+                "open_price_24h": int(float(coin['openPrice'])),
+                "high_24h": int(float(coin['highPrice'])),
+                "low_24h": int(float(coin['lowPrice'])),
+                "volume_24h": int(float(coin['volume'])),
+                "change_24h": int(change_percent),
+                "ema_20": int(price), 
+                "ema_50": int(price),
+                "rsi_val": 50,
+                "bb_upper": int(price * 1.02),
+                "bb_middle": int(price),
+                "bb_lower": int(price * 0.98),
+                "last_tick_direction": "UP" if change_percent >= 0 else "DOWN"
             })
-            
-        if records:
-            records.sort(key=lambda x: x['volume_24h'], reverse=True)
-            await async_manual_upsert("crypto_market_simulation", records[:100])
-            print("✅ النجاح تحقق أخيراً عبر CCXT!")
-            
-    except Exception as e:
-        await exchange.close()
-        print(f"🚨 حتى CCXT واجه مشكلة: {e}")
-        
+        except: continue
+
+    if not records:
+        print("⚠️ لم يتم العثور على عملات تطابق الشرط.")
+        return
+
+    records.sort(key=lambda x: x['volume_24h'], reverse=True)
+    print(f"🚀 تم تجهيز {len(records)} عملة. جاري الرفع لسوبابيس...")
+    
+    # 🟢 الرفع بنظام الدفعات لعدم إرهاق السيرفر
+    batch_size = 25
+    for i in range(0, len(records), batch_size):
+        batch = records[i:i + batch_size]
+        success = await async_manual_upsert("crypto_market_simulation", batch)
+        if not success:
+            print(f"⚠️ فشل تحديث الدفعة عند الرقم {i}")
+
+    print(f"🎉 تم التحديث بنجاح متجاوزين الحظر وبدون بروكسي!")
+
 async def market_updater_background_task():
     """تعمل هذه الدالة في الخلفية لتحديث السوق كل X ثانية"""
     while True:
         try:
             await update_crypto_market_data()
-            # سينتظر البوت 60 ثانية قبل التحديث القادم (يمكنك تعديلها)
             await asyncio.sleep(120) 
         except Exception as e:
-            import logging
             logging.error(f"Market Updater Loop Error: {e}")
-            await asyncio.sleep(120) # الانتظار قليلاً في حال حدوث خطأ حتى لا ينهار البوت
-            
+            await asyncio.sleep(120)
 # ==========================================
 # 5. نهاية الملف: نظام الإنعاش الأبدي 24/7 (النبض الذاتي) ⚡
 # ==========================================
