@@ -1512,28 +1512,28 @@ async def async_manual_upsert(table_name, records):
             return False
 
 async def update_crypto_market_data():
-    # استخدام رابط وسيط للالتفاف على الحظر الجغرافي
-    # هذا الرابط يعمل كـ Bridge بين سيرفرك وبينانس
-    proxy_url = "https://api.allorigins.win/get?url="
-    target_url = "https://api.binance.com/api/v3/ticker/24hr"
-    
-    final_url = f"{proxy_url}{target_url}"
+    # نستخدم وسيطاً يغير الـ IP تلقائياً
+    gateways = [
+        "https://api.allorigins.win/get?url=",
+        "https://thingproxy.freeboard.io/fetch/"
+    ]
+    target = "https://api.binance.com/api/v3/ticker/24hr"
     
     async with aiohttp.ClientSession() as session:
         try:
-            async with session.get(final_url, timeout=30) as res:
-                if res.status == 200:
-                    response_json = await res.json()
-                    # لأن الوسيط يلف البيانات داخل حقل 'contents'
-                    import json
-                    data = json.loads(response_json['contents'])
-                else:
-                    logging.error(f"⚠️ Proxy returned status {res.status}")
-                    return
+            # ندمج الرابطين معاً لكسر الحظر
+            async with session.get(f"{gateways[0]}{target}", timeout=30) as res:
+                resp = await res.json()
+                # ملاحظة: بعض الوسائط تعيد البيانات داخل حقل نصي اسمه 'contents'
+                import json
+                data = json.loads(resp['contents']) if 'contents' in resp else resp
+                
+                if isinstance(data, list):
+                    logging.info("✅ تم كسر الحظر بنجاح وجلب البيانات!")
+                    # هنا نرفع البيانات لسوبابيس
         except Exception as e:
-            logging.error(f"❌ Failed to bypass 451: {e}")
-            return
-
+            logging.error(f"🚨 فشل كسر الحظر بالوسيط: {e}")
+            
     # إذا فشلت جميع المحاولات أو كانت البيانات ليست قائمة
     if not data or not isinstance(data, list):
         logging.error("🚨 فشل جلب البيانات من جميع مصادر بينانس. سيتم المحاولة في الدورة القادمة.")
