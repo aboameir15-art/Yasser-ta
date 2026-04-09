@@ -300,9 +300,11 @@ async def get_active_trades_report(user_id):
     try:
         # 1. جلب بيانات الحساب الشاملة (Snapshot)
         account = await get_trading_account_snapshot(user_id)
-        # الرصيد الكلي = كاش البنك + المبالغ المحجوزة في الصفقات
-        total_balance = account['total_balance'] 
-        total_pnl_all = account['total_pnl'] # الربح/الخسارة الكلي لكل الصفقات
+        
+        # السيولة الفعلية المحركة للحساب
+        equity = account['total_equity'] 
+        # مجموع أرباح وخسائر الصفقات المفتوحة حالياً
+        total_pnl_all = account['total_pnl'] 
         
         res = supabase.table("active_trades").select("*").eq("user_id", int(user_id)).eq("is_active", True).execute()
         trades = res.data
@@ -312,20 +314,22 @@ async def get_active_trades_report(user_id):
 
         pnl_all_emoji = "🟢" if total_pnl_all >= 0 else "🔴"
         
+        # 2. الهيدر المختصر (صافي القيمة والارباح فقط)
         report_text = f"📋 | <b>مـراكز الـتداول الـنشطة</b>\n"
-        report_text += f"💰 الرصيد الكلي: <b>{total_balance:,.2f} $</b>\n"
+        report_text += f"💎 صافي القيمة (Equity): <b>{equity:,.2f} $</b>\n"
         report_text += f"{pnl_all_emoji} إجمالي PnL: <b>{total_pnl_all:+.2f} $</b>\n"
         report_text += "━━━━━━━━━━━━━━━━━━\n"
 
+        # 3. عرض تفاصيل الصفقات
         for trade in trades:
             symbol = trade['symbol']
             side = trade['side']
             entry = float(trade['entry_price'])
             lev = float(trade['leverage'])
-            margin = float(trade['margin']) # المبلغ المستخدم الأساسي
-            quantity = float(trade.get('quantity', 0)) # عدد العملات
+            margin = float(trade['margin'])
+            quantity = float(trade.get('quantity', 0))
             
-            # جلب السعر الحالي للسوق
+            # جلب سعر السوق اللحظي
             coin_res = supabase.table("crypto_market_simulation").select("current_price").eq("symbol", symbol).execute()
             current_price = float(coin_res.data[0]['current_price']) if coin_res.data else entry
 
@@ -334,23 +338,24 @@ async def get_active_trades_report(user_id):
             pnl_amount = margin * pnl_pct * lev
             pnl_emoji = "💰" if pnl_amount >= 0 else "📉"
 
-            # تنسيق الأرقام
             fmt = lambda p: f"{p:,.4f}" if p < 1 else f"{p:,.2f}"
             side_str = "🟢 LONG" if side == 'LONG' else "🔴 SHORT"
 
             report_text += f"<b>#{symbol} | {side_str} {int(lev)}x</b>\n"
-            report_text += f"• الـكمية: <code>{quantity:,.4f}</code>\n" # إضافة الكمية
-            report_text += f"• المـبلغ الـمستخدم: <code>{margin:,.2f} $</code>\n" # إضافة المبلغ الأساسي
+            report_text += f"• الـكمية: <code>{quantity:,.4f}</code>\n"
+            report_text += f"• المـبلغ الـمستخدم: <code>{margin:,.2f} $</code>\n"
             report_text += f"• سـعر الـدخول: <code>{fmt(entry)}</code>\n"
             report_text += f"• الـسعر الحالي: <code>{fmt(current_price)}</code>\n"
             report_text += f"{pnl_emoji} الـربح/الخسارة: <b>{pnl_amount:+.2f} $</b>\n"
             report_text += "━━━━━━━━━━━━━━━━━━\n"
             
         return trades, report_text
+
     except Exception as e:
         import logging
         logging.error(f"Error in trade report: {e}")
         return None, "❌ حدث خطأ أثناء جلب التقرير."
+        
 
 # --- دالة حساب السعر المستهدف (دعم الكسور العشرية) ---
 def calc_price(base_price, roe_pct, is_tp, side, lev):
@@ -371,7 +376,6 @@ def calc_price(base_price, roe_pct, is_tp, side, lev):
     # نرجع السعر بـ 6 أرقام عشرية لضمان الدقة في كل العملات
     return round(target, 6)
     
-
     # --- توليد واجهة الإعدادات ---
 # ==========================================
 # --- [ توليد واجهة الإعدادات المطورة ] ---
