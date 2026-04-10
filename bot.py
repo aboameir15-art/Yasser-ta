@@ -111,11 +111,10 @@ async def get_trading_account_snapshot(user_id):
         return {"free_cash": 0, "used_margin": 0, "total_balance": 0, "total_pnl": 0, "total_equity": 0}
               
 
-
 async def trade_reaper():
     """
     رادار التصفية الشاملة (Binance Cross Margin Engine)
-    المنطق: تصفية كل الصفقات إذا (إجمالي الخسارة العائمة <= - الرصيد الكلي)
+    المنطق: تصفية كل الصفقات والديون إذا (إجمالي الخسارة العائمة <= - الرصيد الكلي)
     """
     while True:
         try:
@@ -127,11 +126,11 @@ async def trade_reaper():
                 await asyncio.sleep(5)
                 continue
 
-            # 2. جلب أسعار السوق الحالية (دفعة واحدة لتسريع المعالجة)
+            # 2. جلب أسعار السوق الحالية
             market_res = supabase.table("crypto_market_simulation").select("symbol, current_price").execute()
             market_prices = {item['symbol']: float(item['current_price']) for item in market_res.data}
 
-            # 3. تجميع الصفقات حسب المستخدم لتقييم الحساب ككتلة واحدة
+            # 3. تجميع الصفقات حسب المستخدم
             users_trades = {}
             for t in active_trades:
                 uid = t['user_id']
@@ -140,15 +139,14 @@ async def trade_reaper():
 
             # 4. المعالجة والمحاسبة
             for uid, trades in users_trades.items():
-                user_res = supabase.table("users_global_profile").select("bank_balance").eq("user_id", uid).execute()
+                user_res = supabase.table("users_global_profile").select("bank_balance, debt_balance").eq("user_id", uid).execute()
                 if not user_res.data: continue
                 
-                bank_balance = float(user_res.data[0]['bank_balance']) # الكاش المتوفر في الحساب
+                bank_balance = float(user_res.data[0].get('bank_balance', 0.0))
                 
                 total_used_margin = 0.0
                 total_unrealized_pnl = 0.0
                 
-                # حساب الحالة المالية الحالية للمستخدم
                 for t in trades:
                     sym = t['symbol']
                     entry = float(t['entry_price'])
@@ -158,30 +156,31 @@ async def trade_reaper():
                     current_p = market_prices.get(sym, entry)
 
                     total_used_margin += margin
-                    # حساب الربح/الخسارة لهذه الصفقة
                     pnl_pct = (current_p - entry) / entry if side == 'LONG' else (entry - current_p) / entry
                     total_unrealized_pnl += (margin * pnl_pct * lev)
 
-                # 📊 الحسبة الذهبية التي طلبتها:
-                # الرصيد الكلي = الكاش المتاح + المبالغ المحجوزة في الصفقات
+                # الرصيد الكلي المتاح كضمان
                 total_account_balance = bank_balance + total_used_margin
                 
-                # 💀 قرار التصفية (The Kill Switch)
-                # إذا كانت الخسارة الكلية (بالسالب) تساوي أو تتجاوز الرصيد الكلي
+                # 💀 قرار التصفية (إعدام الحساب والديون)
                 if total_unrealized_pnl <= -total_account_balance:
-                    # 1. تصفير رصيد البنك تماماً
-                    supabase.table("users_global_profile").update({"bank_balance": 0.0}).eq("user_id", uid).execute()
+                    # 1. تصفير رصيد التداول وتصفير الديون (حسب طلبك يا أثر)
+                    supabase.table("users_global_profile").update({
+                        "bank_balance": 0.0,
+                        "debt_balance": 0.0  # تصفير القرض كلياً
+                    }).eq("user_id", uid).execute()
                     
-                    # 2. إنهاء كافة الصفقات النشطة (تغيير حالتها لغير نشطة)
+                    # 2. إنهاء كافة الصفقات النشطة
                     supabase.table("active_trades").update({"is_active": False}).eq("user_id", uid).eq("is_active", True).execute()
                     
-                    # 3. إرسال إشعار التصفية النهائية
+                    # 3. إرسال إشعار التصفية الشاملة
                     await bot.send_message(
                         uid, 
-                        f"💀 <b>تـصـفـيـة حـسـاب كـامـلـة!</b>\n\n"
-                        f"لقد تجاوزت خسائرك العائمة ({total_unrealized_pnl:,.2f}$) "
-                        f"كامل رصيدك الكلي ({total_account_balance:,.2f}$).\n\n"
-                        f"❌ تم إغلاق جميع صفقاتك وتصفير حساب التداول.", 
+                        f"💀 <b>تـصـفـيـة شـامـلـة لـلحساب والقرض!</b>\n\n"
+                        f"خسائرك العائمة ({total_unrealized_pnl:,.2f}$) استهلكت كامل رصيدك.\n\n"
+                        f"❌ تم إغلاق جميع صفقاتك.\n"
+                        f"🧹 تم تصفير رصيد التداول.\n"
+                        f"تم تصفير جميع الديون المستحقة يمكنك سحب قرض جديد.", 
                         parse_mode="HTML"
                     )
                     continue
@@ -190,8 +189,8 @@ async def trade_reaper():
             import logging
             logging.error(f"❌ Reaper Engine Error: {e}")
             
-        await asyncio.sleep(5) # الفحص كل 5 ثوانٍ لضمان الدقة اللحظية
-                               
+        await asyncio.sleep(5)
+   
 # ==========================================
 # 1. الدوال الحسابية الأساسية (Math Core)
 # ==========================================
@@ -316,8 +315,6 @@ async def get_active_trades_report(user_id):
         
         # 2. الهيدر المختصر (صافي القيمة والارباح فقط)
         report_text = f"📋 | <b>مـراكز الـتداول الـنشطة</b>\n"
-        report_text += f"💎 صافي القيمة (Equity): <b>{equity:,.2f} $</b>\n"
-        report_text += f"{pnl_all_emoji} إجمالي PnL: <b>{total_pnl_all:+.2f} $</b>\n"
         report_text += "━━━━━━━━━━━━━━━━━━\n"
 
         # 3. عرض تفاصيل الصفقات
