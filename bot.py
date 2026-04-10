@@ -1687,22 +1687,24 @@ import pandas as pd
 import numpy as np
 from datetime import datetime
 
-async def fetch_klines(session, symbol, interval, limit=150):
-    """جلب بيانات الشموع من بينانس لفريم محدد"""
+async def fetch_klines(session, symbol, interval, limit=100):
+    """جلب بيانات الشموع الحقيقية لكل فريم زمنياً"""
     url = f"https://api.binance.com/api/v3/klines?symbol={symbol}&interval={interval}&limit={limit}"
     try:
         async with session.get(url, timeout=10) as res:
             if res.status == 200:
                 return await res.json()
+            else:
+                return None
     except Exception:
         return None
 
 def calculate_all_indicators(klines_data):
-    """حساب كافة المؤشرات الفنية يدوياً لضمان استقرار السيرفر"""
-    if not klines_data or len(klines_data) < 100:
+    """حساب المؤشرات بناءً على بيانات الشموع المستلمة"""
+    if not klines_data or len(klines_data) < 30: # حد أدنى كافٍ للحساب
         return None
     
-    # تجهيز البيانات
+    # تحويل الشموع إلى DataFrame
     df = pd.DataFrame(klines_data, columns=[
         'ts', 'open', 'high', 'low', 'close', 'volume', 
         'close_ts', 'quote_av', 'trades', 'tb_base', 'tb_quote', 'ignore'
@@ -1710,28 +1712,29 @@ def calculate_all_indicators(klines_data):
     df = df.apply(pd.to_numeric)
     close = df['close']
 
-    # 1. حساب المتوسطات المتحركة EMA (الثلاثي الذهبي: 20، 50، 100)
+    # 1. حساب EMA (المتوسطات المتحركة)
     ema20 = close.ewm(span=20, adjust=False).mean()
     ema50 = close.ewm(span=50, adjust=False).mean()
     ema100 = close.ewm(span=100, adjust=False).mean()
     
-    # 2. حساب RSI (باستخدام طريقة Wilder المستخدمة في بينانس)
+    # 2. حساب RSI (مؤشر القوة النسبية)
     delta = close.diff()
     gain = delta.clip(lower=0)
     loss = -delta.clip(upper=0)
+    # استخدام المتوسط المتحرك البسيط لآخر 14 شمعة
     avg_gain = gain.rolling(window=14).mean()
     avg_loss = loss.rolling(window=14).mean()
     rs = avg_gain / avg_loss
     rsi = 100 - (100 / (1 + rs))
     
-    # 3. حساب Bollinger Bands (الأبيض والأصفر)
-    bb_middle = close.rolling(window=20).mean() # الخط الأبيض الأوسط
+    # 3. حساب Bollinger Bands
+    bb_middle = close.rolling(window=20).mean() # الخط الأبيض
     std = close.rolling(window=20).std()
-    bb_upper = bb_middle + (std * 2) # الخط الأصفر العلوي
-    bb_lower = bb_middle - (std * 2) # الخط الأصفر السفلي
+    bb_upper = bb_middle + (std * 2) # الأصفر العلوي
+    bb_lower = bb_middle - (std * 2) # الأصفر السفلي
     
-    # 4. حساب متوسط الفوليوم (أبو خط)
-    volume_ma = df['volume'].rolling(window=20).mean()
+    # 4. حساب Volume MA (خط الفوليوم)
+    v_ma = df['volume'].rolling(window=20).mean()
 
     return {
         "ema_20": float(ema20.iloc[-1]),
@@ -1741,22 +1744,21 @@ def calculate_all_indicators(klines_data):
         "bb_upper": float(bb_upper.iloc[-1]),
         "bb_middle": float(bb_middle.iloc[-1]),
         "bb_lower": float(bb_lower.iloc[-1]),
-        "v_ma": float(volume_ma.iloc[-1])
+        "v_ma": float(v_ma.iloc[-1])
     }
 
 async def update_crypto_market_data():
-    print(f"🚀 {datetime.now().strftime('%H:%M:%S')} | بدء تحديث الرادار الشامل (100 عملة × 5 فريمات)...")
+    print(f"🚀 {datetime.now().strftime('%H:%M:%S')} | جلب وتحليل الفريمات المتعددة (بيانات حقيقية)...")
     
     async with aiohttp.ClientSession() as session:
-        # 1. جلب التوب 100 عملة حسب السيولة
+        # جلب قائمة التوب 100
         try:
             async with session.get("https://api.binance.com/api/v3/ticker/24hr") as res:
-                if res.status != 200: return
                 ticker_data = await res.json()
-        except Exception: return
+        except: return
 
         top_coins = [c for c in ticker_data if c['symbol'].endswith('USDT')]
-        top_coins = sorted(top_coins, key=lambda x: float(x['quoteVolume']), reverse=True)[:100]
+        top_coins = sorted(top_coins, key=lambda x: float(x['quoteVolume']), reverse=True)[:200]
         
         timeframes = ['15m', '1h', '2h', '4h', '1d']
         final_records = []
@@ -1778,12 +1780,15 @@ async def update_crypto_market_data():
                 "updated_at": "now()"
             }
             
-            # 2. جلب الشموع وتحليلها بالتوازي لجميع الفريمات
+            # جلب الشموع لكل فريم على حدة
             tasks = [fetch_klines(session, symbol, tf) for tf in timeframes]
-            klines_results = await asyncio.gather(*tasks)
+            all_klines = await asyncio.gather(*tasks)
             
+            # معالجة كل فريم وتحديث السجل الخاص بالعملة
             for i, tf in enumerate(timeframes):
-                indicators = calculate_all_indicators(klines_results[i])
+                klines = all_klines[i]
+                indicators = calculate_all_indicators(klines)
+                
                 if indicators:
                     record.update({
                         f"ema_20_{tf}": indicators['ema_20'],
@@ -1798,14 +1803,12 @@ async def update_crypto_market_data():
             
             final_records.append(record)
 
-        # 3. الرفع إلى سوبابيس بدفعات (Upsert)
-        batch_size = 10 
+        # الرفع لسوبابيس
+        batch_size = 25
         for i in range(0, len(final_records), batch_size):
-            batch = final_records[i:i + batch_size]
-            await async_manual_upsert("crypto_market_simulation", batch)
+            await async_manual_upsert("crypto_market_simulation", final_records[i:i + batch_size])
 
-    print(f"🎉 {datetime.now().strftime('%H:%M:%S')} | تم تحديث 100 عملة بجميع مؤشراتها!")
-    
+    print("✅ تم تحديث الرادار ببيانات زمنية مختلفة وصحيحة!")
     
 async def market_updater_background_task():
     """تعمل هذه الدالة في الخلفية لتحديث السوق كل X ثانية"""
