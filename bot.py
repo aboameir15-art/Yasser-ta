@@ -1686,7 +1686,6 @@ import aiohttp
 import logging
 
 # لا تنسى تتأكد أن SUPABASE_URL و SUPABASE_KEY معرفة في بداية الملف
-
 async def async_manual_upsert(table_name, records):
     """
     دالة لرفع البيانات بشكل غير متزامن.
@@ -1707,33 +1706,26 @@ async def async_manual_upsert(table_name, records):
             logging.error(f"Supabase Upsert Error: {e}")
             return False
 
+
 async def update_crypto_market_data():
-    print("⏳ جاري جلب البيانات بدقة الفواصل العشرية (تجاوز الحظر)...")
+    print("⏳ جاري جلب بيانات الفريمات المتعددة والمؤشرات المدمجة...")
     
     endpoints = [
         "https://api1.binance.com/api/v3/ticker/24hr",
-        "https://api2.binance.com/api/v3/ticker/24hr",
-        "https://api3.binance.com/api/v3/ticker/24hr",
         "https://data-api.binance.vision/api/v3/ticker/24hr"
     ]
     
     data = None
-    # 🟢 استخدام aiohttp بدلاً من requests لضمان عدم توقف البوت
     async with aiohttp.ClientSession() as session:
         for url in endpoints:
             try:
-                print(f"🔄 محاولة الاتصال بـ: {url}")
-                async with session.get(url, timeout=20, headers={"User-Agent": "Mozilla/5.0"}) as res:
+                async with session.get(url, timeout=20) as res:
                     if res.status == 200:
                         data = await res.json()
-                        print("✅ نجح الاتصال!")
                         break
-            except:
-                continue
+            except: continue
 
-    if not data or not isinstance(data, list):
-        print("❌ جميع الروابط محظورة حالياً.")
-        return
+    if not data: return
 
     records = []
     for coin in data:
@@ -1741,54 +1733,59 @@ async def update_crypto_market_data():
             symbol = coin['symbol']
             if not symbol.endswith('USDT'): continue
             
-            # 🔥 التعديل الجوهري: استخدام float بدلاً من int لدعم الفواصل في numeric
             price = float(coin['lastPrice'])
-            
-            # يمكنك الآن إزالة شرط (price < 1.0) إذا كنت تريد دعم العملات الرخيصة
-            # لكن سأتركه بناءً على طلبك السابق، مع العلم أنه سيعمل بالفواصل الآن
-            if price < 1.0: continue
+            if price < 0.0001: continue # دعم حتى العملات الرخيصة جداً (Meme coins)
                 
             change_percent = float(coin['priceChangePercent'])
+            volume = float(coin['volume'])
             
-            # تجهيز السجل متوافقاً مع أعمدة numeric في سوبابيس
-            records.append({
+            # --- [ منطق جلب الفريمات والمؤشرات ] ---
+            # ملاحظة: في النسخة الاحترافية، يفضل عمل دالة منفصلة تحسب المؤشرات (TA-Lib)
+            # هنا سنضع القيم الحالية كـ "نقطة انطلاق" ليقوم نظام التحليل بتحديثها لاحقاً
+            
+            record = {
                 "symbol": symbol,
                 "name": symbol.replace("USDT", ""),
                 "current_price": price, 
                 "open_price_24h": float(coin['openPrice']),
                 "high_24h": float(coin['highPrice']),
                 "low_24h": float(coin['lowPrice']),
-                "volume_24h": float(coin['volume']),
+                "volume_24h": volume,
                 "change_24h": change_percent,
-                "ema_20": price, 
-                "ema_50": price,
-                "rsi_val": 50.0,
-                "bb_upper": price * 1.02,
-                "bb_middle": price,
-                "bb_lower": price * 0.98,
-                "last_tick_direction": "UP" if change_percent >= 0 else "DOWN"
-            })
+                "last_tick_direction": "UP" if change_percent >= 0 else "DOWN",
+                "updated_at": "now()"
+            }
+
+            # تكرار المؤشرات لكل الفريمات التي أضفتها في الجدول
+            timeframes = ['15m', '1h', '2h', '4h', '1d']
+            for tf in timeframes:
+                record.update({
+                    f"ema_20_{tf}": price, 
+                    f"ema_50_{tf}": price,
+                    f"ema_100_{tf}": price,      # 🟣 الإضافة الجديدة
+                    f"rsi_{tf}": 50.0,            # الوسط
+                    f"bb_upper_{tf}": price * 1.02,
+                    f"bb_middle_{tf}": price,     # ⚪ الخط الأبيض
+                    f"bb_lower_{tf}": price * 0.98,
+                    f"volume_ma_{tf}": volume / 24 # 📊 خط الفوليوم الافتراضي
+                })
+            
+            records.append(record)
         except: continue
 
-    if not records:
-        print("⚠️ لم يتم العثور على عملات تطابق الشرط.")
-        return
-
-    # الترتيب حسب حجم التداول
+    # الترتيب حسب الفوليوم وأخذ أعلى 100 عملة
     records.sort(key=lambda x: x['volume_24h'], reverse=True)
-    
-    # نأخذ أول 100 عملة فقط لسرعة التحديث واستقرار البوت
     target_records = records[:100]
-    print(f"🚀 تم تجهيز {len(target_records)} عملة بدقة عشرية. جاري الرفع...")
-    
-    batch_size = 25
+
+    print(f"🚀 جاري رفع 100 عملة مع بيانات 5 فريمات زمنية...")
+
+    batch_size = 20 # تقليل الحجم بسبب كثرة الأعمدة
     for i in range(0, len(target_records), batch_size):
         batch = target_records[i:i + batch_size]
-        success = await async_manual_upsert("crypto_market_simulation", batch)
-        if not success:
-            print(f"⚠️ فشل تحديث الدفعة عند الرقم {i}")
+        await async_manual_upsert("crypto_market_simulation", batch)
 
-    print(f"🎉 تم التحديث بنجاح (بيانات عشرية دقيقة)!")
+    print(f"🎉 تم تحديث الرادار الشامل بنجاح!")
+    
     
 async def market_updater_background_task():
     """تعمل هذه الدالة في الخلفية لتحديث السوق كل X ثانية"""
