@@ -1683,108 +1683,97 @@ async def exec_loan_handler(callback_query: types.CallbackQuery):
 
 import asyncio
 import aiohttp
-import pandas as pd
-import numpy as np
+import math
+import logging  # تمت الإضافة لحل خطأ الـ logging
 from datetime import datetime
 
-async def fetch_klines(session, symbol, interval, limit=100):
-    """جلب بيانات الشموع الحقيقية لكل فريم زمنياً"""
-    url = f"https://api.binance.com/api/v3/klines?symbol={symbol}&interval={interval}&limit={limit}"
-    try:
-        async with session.get(url, timeout=1) as res:
-            if res.status == 200:
-                return await res.json()
-            else:
-                return None
-    except Exception:
-        return None
 
-def calculate_all_indicators(klines_data):
-    """حساب المؤشرات بناءً على بيانات الشموع المستلمة"""
-    if not klines_data or len(klines_data) < 30: # حد أدنى كافٍ للحساب
-        return None
-    
-    # تحويل الشموع إلى DataFrame
-    df = pd.DataFrame(klines_data, columns=[
-        'ts', 'open', 'high', 'low', 'close', 'volume', 
-        'close_ts', 'quote_av', 'trades', 'tb_base', 'tb_quote', 'ignore'
-    ])
-    df = df.apply(pd.to_numeric)
-    close = df['close']
-
-    # 1. حساب EMA (المتوسطات المتحركة)
-    ema20 = close.ewm(span=20, adjust=False).mean()
-    ema50 = close.ewm(span=50, adjust=False).mean()
-    ema100 = close.ewm(span=100, adjust=False).mean()
-    
-    # 2. حساب RSI (مؤشر القوة النسبية)
-    delta = close.diff()
-    gain = delta.clip(lower=0)
-    loss = -delta.clip(upper=0)
-    # استخدام المتوسط المتحرك البسيط لآخر 14 شمعة
-    avg_gain = gain.rolling(window=14).mean()
-    avg_loss = loss.rolling(window=14).mean()
-    rs = avg_gain / avg_loss
-    rsi = 100 - (100 / (1 + rs))
-    
-    # 3. حساب Bollinger Bands
-    bb_middle = close.rolling(window=20).mean() # الخط الأبيض
-    std = close.rolling(window=20).std()
-    bb_upper = bb_middle + (std * 2) # الأصفر العلوي
-    bb_lower = bb_middle - (std * 2) # الأصفر السفلي
-    
-    # 4. حساب Volume MA (خط الفوليوم)
-    v_ma = df['volume'].rolling(window=20).mean()
-
-    return {
-        "ema_20": float(ema20.iloc[-1]),
-        "ema_50": float(ema50.iloc[-1]),
-        "ema_100": float(ema100.iloc[-1]),
-        "rsi": float(rsi.iloc[-1]) if not np.isnan(rsi.iloc[-1]) else 50.0,
-        "bb_upper": float(bb_upper.iloc[-1]),
-        "bb_middle": float(bb_middle.iloc[-1]),
-        "bb_lower": float(bb_lower.iloc[-1]),
-        "v_ma": float(v_ma.iloc[-1])
+# تمت إضافة الدالة المفقودة هنا
+async def async_manual_upsert(table_name, records):
+    headers = {
+        "apikey": SUPABASE_KEY,
+        "Authorization": f"Bearer {SUPABASE_KEY}",
+        "Content-Type": "application/json",
+        "Prefer": "resolution=merge-duplicates"
     }
+    endpoint = f"{SUPABASE_URL}/rest/v1/{table_name}"
+    async with aiohttp.ClientSession() as session:
+        try:
+            async with session.post(endpoint, json=records, headers=headers, timeout=30) as response:
+                return response.status in [200, 201]
+        except Exception as e:
+            logging.error(f"⚠️ خطأ في الرفع: {e}")
+            return False
 
+# --- [ 2. دوال الحساب الرياضي الدقيقة (بدون Pandas) ] ---
+def calculate_ema(data, period):
+    if len(data) < period: return data[-1]
+    alpha = 2 / (period + 1)
+    ema = sum(data[:period]) / period
+    for price in data[period:]:
+        ema = (price * alpha) + (ema * (1 - alpha))
+    return ema
+
+def calculate_rsi(data, period=14):
+    if len(data) < period + 1: return 50.0
+    gains, losses = [], []
+    for i in range(1, len(data)):
+        diff = data[i] - data[i-1]
+        gains.append(max(diff, 0))
+        losses.append(max(-diff, 0))
+    avg_gain = sum(gains[:period]) / period
+    avg_loss = sum(losses[:period]) / period
+    if avg_loss == 0: return 100.0
+    for i in range(period, len(gains)):
+        avg_gain = (avg_gain * (period - 1) + gains[i]) / period
+        avg_loss = (avg_loss * (period - 1) + losses[i]) / period
+    rs = avg_gain / avg_loss
+    return 100 - (100 / (1 + rs))
+
+def calculate_bollinger(data, period=20):
+    if len(data) < period: return data[-1], data[-1], data[-1]
+    recent = data[-period:]
+    sma = sum(recent) / period
+    variance = sum((x - sma) ** 2 for x in recent) / period
+    std_dev = math.sqrt(variance)
+    return sma + (std_dev * 2), sma, sma - (std_dev * 2)
+
+async def fetch_klines(session, symbol, interval, limit=100):
+    url = f"https://data-api.binance.vision/api/v3/klines?symbol={symbol}&interval={interval}&limit={limit}"
+    try:
+        # تم تعديل التايم أوت إلى 10 ثواني لضمان عدم فشل الاتصال
+        async with session.get(url, timeout=10) as res:
+            if res.status == 200: return await res.json()
+    except: return None
+
+# --- [ 3. دالة الجلب والتحليل ] ---
 async def update_crypto_market_data():
-    print(f"🚀 {datetime.now().strftime('%H:%M:%S')} | بدء تحديث الرادار...")
+    print(f"\n🚀 {datetime.now().strftime('%H:%M:%S')} | بدء جلب بيانات Binance Vision...")
     
     async with aiohttp.ClientSession() as session:
-        # 1. جلب التوب 100 مع التحقق من صحة البيانات
         try:
-            async with session.get("https://data-api.binance.vision/api/v3/ticker/24hr", timeout=1) as res:
-                if res.status != 200:
-                    print(f"⚠️ خطأ من بينانس: {res.status}")
-                    return
+            # تم تعديل التايم أوت هنا أيضاً
+            async with session.get("https://data-api.binance.vision/api/v3/ticker/24hr", timeout=10) as res:
+                if res.status != 200: return
                 ticker_data = await res.json()
-                
-                # قفل الأمان: التأكد أن البيانات قائمة وليست نص خطأ
-                if not isinstance(ticker_data, list):
-                    print("❌ استلمنا بيانات خاطئة من بينانس (ليست قائمة)")
-                    return
+                if not isinstance(ticker_data, list): return
         except Exception as e:
-            print(f"❌ فشل الاتصال بـ API: {e}")
+            logging.error(f"❌ فشل الاتصال بـ API: {e}")
             return
 
-        # تصفية USDT وترتيب حسب الفوليوم
-        try:
-            top_coins = [c for c in ticker_data if isinstance(c, dict) and c.get('symbol', '').endswith('USDT')]
-            top_coins = sorted(top_coins, key=lambda x: float(x.get('quoteVolume', 0)), reverse=True)[:100]
-        except Exception as e:
-            print(f"❌ خطأ أثناء تصفية العملات: {e}")
-            return
+        top_coins = [c for c in ticker_data if isinstance(c, dict) and c.get('symbol', '').endswith('USDT') and float(c.get('lastPrice', 0)) >= 1.0]
+        top_coins = sorted(top_coins, key=lambda x: float(x.get('quoteVolume', 0)), reverse=True)[:100]
         
         timeframes = ['15m', '1h', '2h', '4h', '1d']
         final_records = []
 
         for coin in top_coins:
-            # استخدام .get() للحماية من فقدان المفاتيح
             symbol = coin.get('symbol')
             if not symbol: continue
             
             try:
                 price = float(coin.get('lastPrice', 0))
+                change_percent = float(coin.get('priceChangePercent', 0))
                 record = {
                     "symbol": symbol,
                     "name": symbol.replace("USDT", ""),
@@ -1793,55 +1782,52 @@ async def update_crypto_market_data():
                     "high_24h": float(coin.get('highPrice', 0)),
                     "low_24h": float(coin.get('lowPrice', 0)),
                     "volume_24h": float(coin.get('volume', 0)),
-                    "change_24h": float(coin.get('priceChangePercent', 0)),
-                    "last_tick_direction": "UP" if float(coin.get('priceChangePercent', 0)) >= 0 else "DOWN",
+                    "change_24h": change_percent,
+                    "last_tick_direction": "UP" if change_percent >= 0 else "DOWN",
                     "updated_at": "now()"
                 }
                 
-                # جلب الشموع بالتوازي
                 tasks = [fetch_klines(session, symbol, tf) for tf in timeframes]
-                all_klines = await asyncio.gather(*tasks)
-                
-                for i, tf in enumerate(timeframes):
-                    klines = all_klines[i]
-                    # التأكد أن الشموع قائمة بيانات وليست رسالة خطأ
-                    if klines and isinstance(klines, list):
-                        indicators = calculate_all_indicators(klines)
-                        if indicators:
-                            record.update({
-                                f"ema_20_{tf}": indicators['ema_20'],
-                                f"ema_50_{tf}": indicators['ema_50'],
-                                f"ema_100_{tf}": indicators['ema_100'],
-                                f"rsi_{tf}": indicators['rsi'],
-                                f"bb_upper_{tf}": indicators['bb_upper'],
-                                f"bb_middle_{tf}": indicators['bb_middle'],
-                                f"bb_lower_{tf}": indicators['bb_lower'],
-                                f"volume_ma_{tf}": indicators['v_ma']
-                            })
-                
-                final_records.append(record)
-            except Exception as e:
-                print(f"⚠️ خطأ في معالجة العملة {symbol}: {e}")
-                continue
+                results = await asyncio.gather(*tasks)
 
-        # الرفع لسوبابيس
+                for i, tf in enumerate(timeframes):
+                    if results[i] and isinstance(results[i], list):
+                        closes = [float(k[4]) for k in results[i]]
+                        volumes = [float(k[5]) for k in results[i]]
+                        upper, mid, lower = calculate_bollinger(closes)
+                        record.update({
+                            f"ema_20_{tf}": calculate_ema(closes, 20),
+                            f"ema_50_{tf}": calculate_ema(closes, 50),
+                            f"ema_100_{tf}": calculate_ema(closes, 100),
+                            f"rsi_{tf}": calculate_rsi(closes),
+                            f"bb_upper_{tf}": upper, 
+                            f"bb_middle_{tf}": mid, 
+                            f"bb_lower_{tf}": lower,
+                            f"volume_ma_{tf}": sum(volumes[-20:]) / 20
+                        })
+                final_records.append(record)
+            except Exception as e: continue
+
         if final_records:
-            batch_size = 10 
-            for i in range(0, len(final_records), batch_size):
-                await async_manual_upsert("crypto_market_simulation", final_records[i:i + batch_size])
+            print(f"📦 جاري رفع {len(final_records)} عملة إلى سوبابيس...")
+            for i in range(0, len(final_records), 10):
+                await async_manual_upsert("crypto_market_simulation", final_records[i:i + 10])
     
-    print("✅ تم التحديث بنجاح.")
-    
+    print(f"✅ {datetime.now().strftime('%H:%M:%S')} | تم التحديث بنجاح.")
+
+# --- [ 4. حلقة التشغيل التلقائي ] ---
 async def market_updater_background_task():
-    """تعمل هذه الدالة في الخلفية لتحديث السوق كل X ثانية"""
+    """تعمل هذه الدالة في الخلفية لتحديث السوق كل 120 ثانية"""
     while True:
         try:
             await update_crypto_market_data()
+            print("⏳ أنتظر 120 ثانية قبل الجولة القادمة...\n")
             await asyncio.sleep(120) 
         except Exception as e:
             logging.error(f"Market Updater Loop Error: {e}")
-            await asyncio.sleep(120)
-            
+            await asyncio.sleep(30) # انتظار أقصر عند حدوث خطأ للتعافي السريع
+
+
 # ==========================================
 # 5. نهاية الملف: نظام الإنعاش الأبدي 24/7 (النبض الذاتي) ⚡
 # ==========================================
@@ -1925,6 +1911,7 @@ async def main_startup():
         await bot.close()
         await dp.storage.close()
         await dp.storage.wait_closed()
+
 
 if __name__ == '__main__':
     # دمج جميع العمليات في مسار واحد (Event Loop) يمنع التضارب
