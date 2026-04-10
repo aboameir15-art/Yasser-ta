@@ -1753,7 +1753,7 @@ async def update_crypto_market_data():
     async with aiohttp.ClientSession() as session:
         # 1. جلب التوب 100 مع التحقق من صحة البيانات
         try:
-            async with session.get("https://data-api.binance.vision/api/v3/ticker/24hr"", timeout=1) as res:
+            async with session.get("https://data-api.binance.vision/api/v3/ticker/24hr", timeout=1) as res:
                 if res.status != 200:
                     print(f"⚠️ خطأ من بينانس: {res.status}")
                     return
