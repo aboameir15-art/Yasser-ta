@@ -1691,7 +1691,7 @@ async def fetch_klines(session, symbol, interval, limit=100):
     """جلب بيانات الشموع الحقيقية لكل فريم زمنياً"""
     url = f"https://api.binance.com/api/v3/klines?symbol={symbol}&interval={interval}&limit={limit}"
     try:
-        async with session.get(url, timeout=10) as res:
+        async with session.get(url, timeout=1) as res:
             if res.status == 200:
                 return await res.json()
             else:
@@ -1753,7 +1753,7 @@ async def update_crypto_market_data():
     async with aiohttp.ClientSession() as session:
         # 1. جلب التوب 100 مع التحقق من صحة البيانات
         try:
-            async with session.get("https://api.binance.com/api/v3/ticker/24hr", timeout=15) as res:
+            async with session.get("https://data-api.binance.vision/api/v3/ticker/24hr"", timeout=1) as res:
                 if res.status != 200:
                     print(f"⚠️ خطأ من بينانس: {res.status}")
                     return
