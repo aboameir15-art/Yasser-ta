@@ -1680,111 +1680,126 @@ async def exec_loan_handler(callback_query: types.CallbackQuery):
     except Exception as e:
         logging.error(f"❌ Loan Error: {e}")
         await callback_query.answer("❌ فشل في تحديث قاعدة البيانات، حاول لاحقاً.", show_alert=True)
-        
+
 import asyncio
 import aiohttp
-import logging
+import pandas as pd
+import pandas_ta as ta
+from datetime import datetime
 
-# لا تنسى تتأكد أن SUPABASE_URL و SUPABASE_KEY معرفة في بداية الملف
-async def async_manual_upsert(table_name, records):
-    """
-    دالة لرفع البيانات بشكل غير متزامن.
-    """
-    headers = {
-        "apikey": SUPABASE_KEY,
-        "Authorization": f"Bearer {SUPABASE_KEY}",
-        "Content-Type": "application/json",
-        "Prefer": "resolution=merge-duplicates"
-    }
-    endpoint = f"{SUPABASE_URL}/rest/v1/{table_name}"
+async def fetch_klines(session, symbol, interval, limit=150):
+    """جلب بيانات الشموع من بينانس لفريم محدد"""
+    url = f"https://api.binance.com/api/v3/klines?symbol={symbol}&interval={interval}&limit={limit}"
+    try:
+        async with session.get(url, timeout=10) as res:
+            if res.status == 200:
+                return await res.json()
+    except Exception as e:
+        return None
+
+def calculate_all_indicators(klines_data):
+    """حساب كافة المؤشرات الفنية بدقة الحيتان"""
+    if not klines_data or len(klines_data) < 100:
+        return None
     
-    async with aiohttp.ClientSession() as session:
-        try:
-            async with session.post(endpoint, json=records, headers=headers, timeout=60) as response:
-                return response.status in [200, 201]
-        except Exception as e:
-            logging.error(f"Supabase Upsert Error: {e}")
-            return False
+    # تحويل البيانات إلى DataFrame
+    df = pd.DataFrame(klines_data, columns=[
+        'ts', 'open', 'high', 'low', 'close', 'volume', 
+        'close_ts', 'quote_av', 'trades', 'tb_base', 'tb_quote', 'ignore'
+    ])
+    df = df.apply(pd.to_numeric)
+    
+    # 1. حساب المتوسطات المتحركة (الثلاثي الذهبي)
+    ema20 = df.ta.ema(length=20)
+    ema50 = df.ta.ema(length=50)
+    ema100 = df.ta.ema(length=100)
+    
+    # 2. حساب مؤشر القوة النسبية (RSI 78/22)
+    rsi = df.ta.rsi(length=14)
+    
+    # 3. حساب بولنجر باندز (الأصفر والأبيض)
+    bb = df.ta.bbands(length=20, std=2)
+    
+    # 4. حساب خط متوسط الفوليوم (أبو خط)
+    volume_ma = df['volume'].rolling(window=20).mean()
+    
+    # التأكد من عدم وجود قيم فارغة في الصف الأخير
+    if ema100.empty or rsi.empty or bb.empty:
+        return None
 
+    return {
+        "ema_20": float(ema20.iloc[-1]),
+        "ema_50": float(ema50.iloc[-1]),
+        "ema_100": float(ema100.iloc[-1]),
+        "rsi": float(rsi.iloc[-1]),
+        "bb_upper": float(bb['BBU_20_2.0'].iloc[-1]),
+        "bb_middle": float(bb['BBM_20_2.0'].iloc[-1]),
+        "bb_lower": float(bb['BBL_20_2.0'].iloc[-1]),
+        "v_ma": float(volume_ma.iloc[-1])
+    }
 
 async def update_crypto_market_data():
-    print("⏳ جاري جلب بيانات الفريمات المتعددة والمؤشرات المدمجة...")
+    print(f"🚀 {datetime.now().strftime('%H:%M:%S')} | بدء تحديث الرادار الشامل (100 عملة × 5 فريمات)...")
     
-    endpoints = [
-        "https://api1.binance.com/api/v3/ticker/24hr",
-        "https://data-api.binance.vision/api/v3/ticker/24hr"
-    ]
-    
-    data = None
     async with aiohttp.ClientSession() as session:
-        for url in endpoints:
-            try:
-                async with session.get(url, timeout=20) as res:
-                    if res.status == 200:
-                        data = await res.json()
-                        break
-            except: continue
-
-    if not data: return
-
-    records = []
-    for coin in data:
+        # 1. جلب التوب 100 عملة حسب السيولة
         try:
+            async with session.get("https://api.binance.com/api/v3/ticker/24hr") as res:
+                if res.status != 200: return
+                ticker_data = await res.json()
+        except: return
+
+        # تصفية USDT وترتيب حسب الفوليوم
+        top_coins = [c for c in ticker_data if c['symbol'].endswith('USDT')]
+        top_coins = sorted(top_coins, key=lambda x: float(x['quoteVolume']), reverse=True)[:100]
+        
+        timeframes = ['15m', '1h', '2h', '4h', '1d']
+        final_records = []
+
+        for coin in top_coins:
             symbol = coin['symbol']
-            if not symbol.endswith('USDT'): continue
-            
             price = float(coin['lastPrice'])
-            if price < 0.0001: continue # دعم حتى العملات الرخيصة جداً (Meme coins)
-                
-            change_percent = float(coin['priceChangePercent'])
-            volume = float(coin['volume'])
-            
-            # --- [ منطق جلب الفريمات والمؤشرات ] ---
-            # ملاحظة: في النسخة الاحترافية، يفضل عمل دالة منفصلة تحسب المؤشرات (TA-Lib)
-            # هنا سنضع القيم الحالية كـ "نقطة انطلاق" ليقوم نظام التحليل بتحديثها لاحقاً
             
             record = {
                 "symbol": symbol,
                 "name": symbol.replace("USDT", ""),
-                "current_price": price, 
+                "current_price": price,
                 "open_price_24h": float(coin['openPrice']),
                 "high_24h": float(coin['highPrice']),
                 "low_24h": float(coin['lowPrice']),
-                "volume_24h": volume,
-                "change_24h": change_percent,
-                "last_tick_direction": "UP" if change_percent >= 0 else "DOWN",
+                "volume_24h": float(coin['volume']),
+                "change_24h": float(coin['priceChangePercent']),
+                "last_tick_direction": "UP" if float(coin['priceChangePercent']) >= 0 else "DOWN",
                 "updated_at": "now()"
             }
-
-            # تكرار المؤشرات لكل الفريمات التي أضفتها في الجدول
-            timeframes = ['15m', '1h', '2h', '4h', '1d']
-            for tf in timeframes:
-                record.update({
-                    f"ema_20_{tf}": price, 
-                    f"ema_50_{tf}": price,
-                    f"ema_100_{tf}": price,      # 🟣 الإضافة الجديدة
-                    f"rsi_{tf}": 50.0,            # الوسط
-                    f"bb_upper_{tf}": price * 1.02,
-                    f"bb_middle_{tf}": price,     # ⚪ الخط الأبيض
-                    f"bb_lower_{tf}": price * 0.98,
-                    f"volume_ma_{tf}": volume / 24 # 📊 خط الفوليوم الافتراضي
-                })
             
-            records.append(record)
-        except: continue
+            # 2. جلب الشموع لجميع الفريمات بالتوازي (تسريع العملية)
+            tasks = [fetch_klines(session, symbol, tf) for tf in timeframes]
+            klines_results = await asyncio.gather(*tasks)
+            
+            for i, tf in enumerate(timeframes):
+                indicators = calculate_all_indicators(klines_results[i])
+                if indicators:
+                    record.update({
+                        f"ema_20_{tf}": indicators['ema_20'],
+                        f"ema_50_{tf}": indicators['ema_50'],
+                        f"ema_100_{tf}": indicators['ema_100'],
+                        f"rsi_{tf}": indicators['rsi'],
+                        f"bb_upper_{tf}": indicators['bb_upper'],
+                        f"bb_middle_{tf}": indicators['bb_middle'],
+                        f"bb_lower_{tf}": indicators['bb_lower'],
+                        f"volume_ma_{tf}": indicators['v_ma']
+                    })
+            
+            final_records.append(record)
 
-    # الترتيب حسب الفوليوم وأخذ أعلى 100 عملة
-    records.sort(key=lambda x: x['volume_24h'], reverse=True)
-    target_records = records[:100]
+        # 3. الرفع إلى سوبابيس بدفعات ذكية
+        batch_size = 15 
+        for i in range(0, len(final_records), batch_size):
+            batch = final_records[i:i + batch_size]
+            await async_manual_upsert("crypto_market_simulation", batch)
 
-    print(f"🚀 جاري رفع 100 عملة مع بيانات 5 فريمات زمنية...")
-
-    batch_size = 20 # تقليل الحجم بسبب كثرة الأعمدة
-    for i in range(0, len(target_records), batch_size):
-        batch = target_records[i:i + batch_size]
-        await async_manual_upsert("crypto_market_simulation", batch)
-
-    print(f"🎉 تم تحديث الرادار الشامل بنجاح!")
+    print(f"🎉 {datetime.now().strftime('%H:%M:%S')} | تم تحديث 500 مؤشر بنجاح!")
     
     
 async def market_updater_background_task():
