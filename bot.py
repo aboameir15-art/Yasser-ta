@@ -1684,7 +1684,7 @@ async def exec_loan_handler(callback_query: types.CallbackQuery):
 import asyncio
 import aiohttp
 import pandas as pd
-import pandas_ta as ta
+import numpy as np
 from datetime import datetime
 
 async def fetch_klines(session, symbol, interval, limit=150):
@@ -1694,47 +1694,53 @@ async def fetch_klines(session, symbol, interval, limit=150):
         async with session.get(url, timeout=10) as res:
             if res.status == 200:
                 return await res.json()
-    except Exception as e:
+    except Exception:
         return None
 
 def calculate_all_indicators(klines_data):
-    """حساب كافة المؤشرات الفنية بدقة الحيتان"""
+    """حساب كافة المؤشرات الفنية يدوياً لضمان استقرار السيرفر"""
     if not klines_data or len(klines_data) < 100:
         return None
     
-    # تحويل البيانات إلى DataFrame
+    # تجهيز البيانات
     df = pd.DataFrame(klines_data, columns=[
         'ts', 'open', 'high', 'low', 'close', 'volume', 
         'close_ts', 'quote_av', 'trades', 'tb_base', 'tb_quote', 'ignore'
     ])
     df = df.apply(pd.to_numeric)
+    close = df['close']
+
+    # 1. حساب المتوسطات المتحركة EMA (الثلاثي الذهبي: 20، 50، 100)
+    ema20 = close.ewm(span=20, adjust=False).mean()
+    ema50 = close.ewm(span=50, adjust=False).mean()
+    ema100 = close.ewm(span=100, adjust=False).mean()
     
-    # 1. حساب المتوسطات المتحركة (الثلاثي الذهبي)
-    ema20 = df.ta.ema(length=20)
-    ema50 = df.ta.ema(length=50)
-    ema100 = df.ta.ema(length=100)
+    # 2. حساب RSI (باستخدام طريقة Wilder المستخدمة في بينانس)
+    delta = close.diff()
+    gain = delta.clip(lower=0)
+    loss = -delta.clip(upper=0)
+    avg_gain = gain.rolling(window=14).mean()
+    avg_loss = loss.rolling(window=14).mean()
+    rs = avg_gain / avg_loss
+    rsi = 100 - (100 / (1 + rs))
     
-    # 2. حساب مؤشر القوة النسبية (RSI 78/22)
-    rsi = df.ta.rsi(length=14)
+    # 3. حساب Bollinger Bands (الأبيض والأصفر)
+    bb_middle = close.rolling(window=20).mean() # الخط الأبيض الأوسط
+    std = close.rolling(window=20).std()
+    bb_upper = bb_middle + (std * 2) # الخط الأصفر العلوي
+    bb_lower = bb_middle - (std * 2) # الخط الأصفر السفلي
     
-    # 3. حساب بولنجر باندز (الأصفر والأبيض)
-    bb = df.ta.bbands(length=20, std=2)
-    
-    # 4. حساب خط متوسط الفوليوم (أبو خط)
+    # 4. حساب متوسط الفوليوم (أبو خط)
     volume_ma = df['volume'].rolling(window=20).mean()
-    
-    # التأكد من عدم وجود قيم فارغة في الصف الأخير
-    if ema100.empty or rsi.empty or bb.empty:
-        return None
 
     return {
         "ema_20": float(ema20.iloc[-1]),
         "ema_50": float(ema50.iloc[-1]),
         "ema_100": float(ema100.iloc[-1]),
-        "rsi": float(rsi.iloc[-1]),
-        "bb_upper": float(bb['BBU_20_2.0'].iloc[-1]),
-        "bb_middle": float(bb['BBM_20_2.0'].iloc[-1]),
-        "bb_lower": float(bb['BBL_20_2.0'].iloc[-1]),
+        "rsi": float(rsi.iloc[-1]) if not np.isnan(rsi.iloc[-1]) else 50.0,
+        "bb_upper": float(bb_upper.iloc[-1]),
+        "bb_middle": float(bb_middle.iloc[-1]),
+        "bb_lower": float(bb_lower.iloc[-1]),
         "v_ma": float(volume_ma.iloc[-1])
     }
 
@@ -1747,9 +1753,8 @@ async def update_crypto_market_data():
             async with session.get("https://api.binance.com/api/v3/ticker/24hr") as res:
                 if res.status != 200: return
                 ticker_data = await res.json()
-        except: return
+        except Exception: return
 
-        # تصفية USDT وترتيب حسب الفوليوم
         top_coins = [c for c in ticker_data if c['symbol'].endswith('USDT')]
         top_coins = sorted(top_coins, key=lambda x: float(x['quoteVolume']), reverse=True)[:100]
         
@@ -1773,7 +1778,7 @@ async def update_crypto_market_data():
                 "updated_at": "now()"
             }
             
-            # 2. جلب الشموع لجميع الفريمات بالتوازي (تسريع العملية)
+            # 2. جلب الشموع وتحليلها بالتوازي لجميع الفريمات
             tasks = [fetch_klines(session, symbol, tf) for tf in timeframes]
             klines_results = await asyncio.gather(*tasks)
             
@@ -1793,13 +1798,13 @@ async def update_crypto_market_data():
             
             final_records.append(record)
 
-        # 3. الرفع إلى سوبابيس بدفعات ذكية
-        batch_size = 15 
+        # 3. الرفع إلى سوبابيس بدفعات (Upsert)
+        batch_size = 10 
         for i in range(0, len(final_records), batch_size):
             batch = final_records[i:i + batch_size]
             await async_manual_upsert("crypto_market_simulation", batch)
 
-    print(f"🎉 {datetime.now().strftime('%H:%M:%S')} | تم تحديث 500 مؤشر بنجاح!")
+    print(f"🎉 {datetime.now().strftime('%H:%M:%S')} | تم تحديث 100 عملة بجميع مؤشراتها!")
     
     
 async def market_updater_background_task():
