@@ -9,3 +9,5 @@ python-bidi
 pilmoji
 requests
 ccxt
+pandas_ta
+pandas
