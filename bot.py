@@ -291,7 +291,40 @@ async def intelligence_scanner():
             await trigger_golden_signal(symbol, score, reasons, fib_618)
 
     print("✅ تم الانتهاء من دورة المسح وتحديث الأهداف.")
+
+
+
+async def trigger_golden_signal(symbol, score, reasons, fib_618):
+    """صياغة وإرسال الإنذار الذهبي للآدمن فقط"""
     
+    # بناء نص الرسالة الاستخباراتية
+    text = (
+        f"🚨 <b>إشعار استخباراتي: فرصة ذهبية!</b> 🚨\n\n"
+        f"🪙 <b>العملة:</b> <code>#{symbol}</code>\n"
+        f"🔥 <b>درجة الانفجار:</b> <code>{score}/100</code> 🟢\n"
+        f"━━━━━━━━━━━━━━━━━━\n"
+        f"🕵️‍♂️ <b>الأسرار المرصودة:</b>\n"
+    )
+    
+    for reason in reasons:
+        text += f"- {reason}\n"
+        
+    text += (
+        f"\n📐 <b>المستويات الفنية:</b>\n"
+        f"👈 النسبة الذهبية (0.618): <code>{fib_618:,.4f} $</code>\n"
+        f"━━━━━━━━━━━━━━━━━━\n"
+        f"<i>⚠️ هذه البيانات سرية ومرسلة لك فقط يا أثر.</i>"
+    )
+
+    # إنشاء زر سريع لفتح إعدادات الصفقة لهذه العملة
+    keyboard = types.InlineKeyboardMarkup()
+    keyboard.add(types.InlineKeyboardButton(f"⚡ قنص {symbol} الآن", callback_data=f"setup_trade_{symbol}"))
+
+    try:
+        # الإرسال للـ ADMIN_ID حصراً
+        await bot.send_message(chat_id=ADMIN_ID, text=text, reply_markup=keyboard, parse_mode="HTML")
+    except Exception as e:
+        print(f"Error sending signal: {e}")
 # ==========================================
 # 1. الدوال الحسابية الأساسية (Math Core)
 # ==========================================
