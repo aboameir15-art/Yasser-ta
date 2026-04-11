@@ -64,6 +64,10 @@ bot_username = None
 # ==========================================
 # 1. إعدادات الجلسات والقيم الثابتة (Config & State)
 # ==========================================
+# 1. قائمة لمراقبة الجلسات التي قيد التحديث حالياً لمنع التكرار والحظر
+active_updates = set()
+# أضف هذا المتغير في أعلى ملف الكود خارج الدوال
+active_updates = {}
 trade_sessions = {}
 LEVERAGE_LEVELS = [1, 2, 5, 10, 20, 45]
 MARGIN_PCT_LEVELS = [2, 5, 10, 25, 50, 75, 100]
@@ -689,88 +693,86 @@ def get_trade_setup_keyboard(user_id):
     return markup
     
 
+# أضف هذا المتغير في أعلى ملف الكود خارج الدوال
+active_updates = {}
+
 async def update_trade_ui(callback_query: types.CallbackQuery):
     user_id = callback_query.from_user.id
     if user_id not in trade_sessions: return
     
-    session = trade_sessions[user_id]
-    sym = session['symbol']
-    side = session['side']
+    # --- 🛡️ نظام منع التكرار والحظر ---
+    # إذا كانت هناك حلقة تعمل بالفعل لهذا المستخدم، نقوم بإلغائها لبدء واحدة جديدة بالقيم الجديدة
+    if user_id in active_updates:
+        active_updates[user_id].cancel()
     
-    # نستخدم حلقة لتحديث البيانات تلقائياً (مثلاً 15 مرة كل 3 ثوانٍ)
-    for _ in range(15):
-        if user_id not in trade_sessions: break # خروج إذا أغلق المستخدم الجلسة
-        
-        session = trade_sessions[user_id]
-        
-        # 1. جلب السعر اللحظي من سوبابيس (للحسابات المباشرة)
-        res = supabase.table("crypto_market_simulation").select("*").eq("symbol", sym).execute()
-        if not res.data: break
-        
-        coin_data = res.data[0]
-        market_price = float(coin_data['current_price'])
-        
-        # حفظ السعر الحالي في الجلسة للمقارنة
-        session['market_price'] = market_price
-        
-        # إذا لم يختر المستخدم سعر دخول محدد (Limit)، نستخدم سعر السوق
-        if session.get('selected_entry_price') is None:
-            price = market_price
-            session['entry_price'] = price
-            status_tag = "⚡ سـعر الـسوق (مباشر)"
-        else:
-            price = session['selected_entry_price']
-            status_tag = "🕒 سـعر معلق (Limit)"
+    # إنشاء مهمة (Task) جديدة للحلقة وحفظها في القاموس
+    task = asyncio.create_task(run_ui_loop(callback_query, user_id))
+    active_updates[user_id] = task
 
-        # 2. الحسابات المالية الدقيقة
-        bal = session['balance']
-        lev = session['leverage']
-        pct = session['margin_pct']
-        
-        margin_amount = bal * (pct / 100.0)
-        total_position = margin_amount * lev
-        quantity = total_position / price if price > 0 else 0
-        
-        # حساب التصفية بناءً على السعر (المعلق أو المباشر)
-        liq_price = calculate_liquidation(price, lev, side, margin_amount=margin_amount, quantity=quantity)
-        
-        side_text = "🟢 شـراء (LONG) 🚀" if side == 'LONG' else "🔴 بـيـع (SHORT) 🩸"
-        
-        # 3. بناء النص التفاعلي
-        text = f"⚙️ | <b>إعـداد صـفـقـة: #{sym}</b>\n"
-        text += f"الـنوع: {side_text} | {status_tag}\n"
-        text += "━━━━━━━━━━━━━━━━━━\n"
-        
-        # تمييز السعر إذا كان يتحدث تلقائياً
-        p_str = f"{price:,.4f}" if price < 1 else f"{price:,.2f}"
-        text += f"💵 سـعـر الـدخول: <code>{p_str} $</code> {'🔄' if status_tag.startswith('⚡') else '📌'}\n"
-        
-        text += f"🏦 رصـيـدك الـمـتـاح: <code>{bal:,.2f} $</code>\n\n"
-        text += f"⚖️ الـرافـعـة الـمـالـيـة: <b>{lev}x</b>\n"
-        text += f"💼 الـمـبـلـغ الـمـسـتـخـدم: <b>{margin_amount:,.2f} $</b> ({pct}%)\n"
-        text += f"🪙 حـجـم الـعـمـلات: <b>{quantity:,.4f} {sym}</b>\n"
-        
-        text += f"\n⚠️ <b>سـعر الـتصفية:</b> <code>{liq_price:,.4f} $</code>\n"
-        text += "━━━━━━━━━━━━━━━━━━\n"
-        text += "<i>البيانات تتحدث تلقائياً.. اختر إعداداتك ثم أكد.</i>"
-
-        try:
-            # تحديث الرسالة والكيبورد (الذي يحتوي الآن على مناطق الدخول)
-            await callback_query.message.edit_text(
-                text, 
-                reply_markup=get_trade_setup_keyboard(user_id), 
-                parse_mode="HTML"
-            )
-        except:
-            # لتجنب أخطاء تليجرام في حال لم يتغير النص أو تم مسح الرسالة
-            pass
-
-        # إذا كان المستخدم اختار سعراً معلقاً، لا داعي للتحديث اللحظي للسعر (اختياري)
-        if status_tag.startswith('🕒'): 
-            break 
+async def run_ui_loop(callback_query, user_id):
+    """هذه الدالة الفرعية هي التي تدير الحلقة لمنع تداخل الكود"""
+    try:
+        for _ in range(15):
+            if user_id not in trade_sessions: break
             
-        await asyncio.sleep(3) # انتظر 3 ثوانٍ قبل التحديث القادم
-        
+            session = trade_sessions[user_id]
+            sym = session['symbol']
+            
+            # 1. جلب السعر اللحظي
+            res = supabase.table("crypto_market_simulation").select("*").eq("symbol", sym).execute()
+            if not res.data: break
+            
+            market_price = float(res.data[0]['current_price'])
+            session['market_price'] = market_price
+            
+            # 2. تحديد نوع السعر (Market vs Limit)
+            is_limit = session.get('selected_entry_price') is not None
+            price = session['selected_entry_price'] if is_limit else market_price
+            session['entry_price'] = price
+            
+            status_tag = "🕒 سـعر معلق (Limit)" if is_limit else "⚡ سـعر الـسوق (مباشر)"
+            icon = "📌" if is_limit else "🔄"
+
+            # 3. الحسابات المالية
+            margin_amount = session['balance'] * (session['margin_pct'] / 100.0)
+            quantity = (margin_amount * session['leverage']) / price
+            liq_price = calculate_liquidation(price, session['leverage'], session['side'], margin_amount, quantity)
+            
+            # 4. بناء النص
+            text = (
+                f"⚙️ | <b>إعـداد صـفـقـة: #{sym}</b>\n"
+                f"الـنوع: {'🟢 LONG' if session['side'] == 'LONG' else '🔴 SHORT'} | {status_tag}\n"
+                f"━━━━━━━━━━━━━━━━━━\n"
+                f"💵 سـعـر الـدخول: <code>{price:,.4f} $</code> {icon}\n"
+                f"⚖️ الـرافـعـة: <b>{session['leverage']}x</b>\n"
+                f"💼 الـمبلغ: <b>{margin_amount:,.2f} $</b> ({session['margin_pct']}%)\n"
+                f"⚠️ الـتصفية: <code>{liq_price:,.4f} $</code>\n"
+                f"━━━━━━━━━━━━━━━━━━\n"
+                f"<i>البيانات تتحدث تلقائياً..</i>"
+            )
+
+            try:
+                await callback_query.message.edit_text(
+                    text, 
+                    reply_markup=get_trade_setup_keyboard(user_id), 
+                    parse_mode="HTML"
+                )
+            except Exception: pass
+
+            # 🛑 إذا كان السعر معلقاً، نكتفي بتحديث واحد فقط وننهي الحلقة فوراً
+            if is_limit: break
+            
+            await asyncio.sleep(4) # وقت أمان لمنع حظر تليجرام
+            
+    except asyncio.CancelledError:
+        pass # تم إلغاء المهمة لبدء واحدة جديدة
+    finally:
+        # مسح المهمة من السجل عند الانتهاء
+        if active_updates.get(user_id) == asyncio.current_task():
+            active_updates.pop(user_id, None)
+            
+
+
 def get_wallet_keyboard(user_id, debt):
     markup = InlineKeyboardMarkup(row_width=2)
     
@@ -1298,30 +1300,33 @@ async def process_setup_trade(callback_query: types.CallbackQuery):
         print(f"Error: {e}")
         await callback_query.answer("⚠️ خطأ في التجهيز.")
         
+
 @dp.callback_query_handler(Text(startswith='trade_cycle:'), state="*")
 async def process_trade_cycle(callback_query: types.CallbackQuery):
-    # 🔐 القفل الأمني (قراءة المالك من الداتا)
     data_parts = callback_query.data.split(':')
     owner_id = int(data_parts[1])
+    
     if callback_query.from_user.id != owner_id:
         return await callback_query.answer("⚠️ المتصفح ليس لك!", show_alert=True)
 
     if owner_id not in trade_sessions:
-        return await callback_query.answer("⚠️ انتهت الجلسة، اطلب العملة مجدداً.", show_alert=True)
+        return await callback_query.answer("⚠️ انتهت الجلسة.")
     
     action = data_parts[2]
     session = trade_sessions[owner_id]
     
+    # تحديث القيم في الجلسة
     if action == 'leverage':
         idx = LEVERAGE_LEVELS.index(session['leverage'])
         session['leverage'] = LEVERAGE_LEVELS[(idx + 1) % len(LEVERAGE_LEVELS)]
     elif action == 'margin':
         idx = MARGIN_PCT_LEVELS.index(session['margin_pct'])
         session['margin_pct'] = MARGIN_PCT_LEVELS[(idx + 1) % len(MARGIN_PCT_LEVELS)]
-    elif action == 'duration':
-        idx = DURATION_KEYS.index(session['duration'])
-        session['duration'] = DURATION_KEYS[(idx + 1) % len(DURATION_KEYS)]
-        
+    
+    # الإجابة على الكولباك لمنع ظهور الساعة الرملية
+    await callback_query.answer(f"تم تحديث {action}")
+    
+    # استدعاء التحديث (الدالة ستحمي نفسها من التكرار)
     await update_trade_ui(callback_query)
 
 @dp.callback_query_handler(Text(startswith='trade_zones:'), state="*")
@@ -1330,17 +1335,35 @@ async def handle_trade_zones_activation(callback_query: types.CallbackQuery):
     user_id = int(data[1])
     
     if user_id not in trade_sessions:
-        return await callback_query.answer("⚠️ الجلسة منتهية، يرجى إعادة الطلب.")
+        return await callback_query.answer("⚠️ الجلسة منتهية.")
 
-    # 1. تفعيل مفتاح عرض المناطق في الجلسة
+    # تفعيل عرض المناطق
     trade_sessions[user_id]['show_zones'] = True
     
-    # 2. إرسال تنبيه سريع للمستخدم
-    await callback_query.answer("🎯 تم استخراج مستويات الدخول الذكية...")
+    await callback_query.answer("🎯 جاري استخراج مناطق الدخول...")
     
-    # 3. استدعاء دالة التحديث فوراً لتغيير شكل الكيبورد وإظهار المناطق
+    # التحديث فوراً
     await update_trade_ui(callback_query)
-    
+
+@dp.callback_query_handler(Text(startswith='set_zone:'), state="*")
+async def handle_set_zone(callback_query: types.CallbackQuery):
+    data = callback_query.data.split(':')
+    user_id = int(data[1])
+    value = data[2]
+
+    if user_id not in trade_sessions:
+        return await callback_query.answer("⚠️ انتهت الجلسة.")
+
+    if value == "market":
+        trade_sessions[user_id]['selected_entry_price'] = None
+    else:
+        # تحديد السعر المختار يدوياً (Limit Order)
+        trade_sessions[user_id]['selected_entry_price'] = float(value)
+        trade_sessions[user_id]['entry_price'] = float(value)
+
+    await callback_query.answer("📍 تم تحديد سعر الدخول")
+    await update_trade_ui(callback_query)
+        
 
 @dp.callback_query_handler(Text(startswith='trade_confirm:'), state="*")
 async def process_trade_confirm(callback_query: types.CallbackQuery):
