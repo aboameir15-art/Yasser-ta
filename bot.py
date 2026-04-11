@@ -2287,7 +2287,7 @@ async def update_crypto_market_data():
         ]
         
         # ترتيب حسب أعلى سيولة (Quote Volume) واختيار أعلى 100 عملة
-        top_coins = sorted(top_coins, key=lambda x: float(x.get('quoteVolume', 0)), reverse=True)[:100]
+        top_coins = sorted(top_coins, key=lambda x: float(x.get('quoteVolume', 0)), reverse=True)[:200]
         
         timeframes = ['15m', '1h', '2h', '4h', '1d']
         final_records = []
@@ -2344,7 +2344,7 @@ async def update_crypto_market_data():
 
         if final_records:
             print(f"📦 جاري رفع {len(final_records)} عملة (استخبارات كاملة) إلى سوبابيس...")
-            for i in range(0, len(final_records), 20):
+            for i in range(0, len(final_records), 10):
                 await async_manual_upsert("crypto_market_simulation", final_records[i:i + 10])
     
     print(f"✅ {datetime.now().strftime('%H:%M:%S')} | تم التحديث بنجاح.")
