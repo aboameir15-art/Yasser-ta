@@ -259,6 +259,11 @@ def calculate_liquidation(entry_price, leverage, side, margin_amount=None, quant
     
     return max(0, round(liq_price, 6))
     
+# بديل لـ numpy إذا كنت لا تريد استخدامه لتوليد 4 مناطق
+def get_zones(low, high, count=4):
+    step = (high - low) / (count - 1)
+    return [low + (step * i) for i in range(count)]
+
 
 def generate_candle_chart(direction):
     """تمثيل مرئي بسيط لاتجاه الحركة الحالية"""
@@ -656,16 +661,15 @@ def get_trade_setup_keyboard(user_id):
         # توليد مناطق الدخول
         c_price = session['market_price']
         high = session['high_24h']
-        low = session['low_24h']
-        
-        # حساب 4 مناطق دخول منطقية
+        low = session['low_24h']        
+        # داخل الكيبورد استبدل سطر zones بـ:    
         zones = []
         if side == 'LONG':
             # مناطق بين الأدنى والسعر الحالي
-            zones = np.linspace(low, c_price, 4).tolist()
+            zones = get_zones(low, c_price)
         else:
             # مناطق بين الحالي والأعلى
-            zones = np.linspace(c_price, high, 4).tolist()
+            zones = get_zones(c_price, high)
         
         zone_buttons = []
         for z in zones:
@@ -1319,6 +1323,23 @@ async def process_trade_cycle(callback_query: types.CallbackQuery):
         session['duration'] = DURATION_KEYS[(idx + 1) % len(DURATION_KEYS)]
         
     await update_trade_ui(callback_query)
+
+@dp.callback_query_handler(Text(startswith='trade_zones:'), state="*")
+async def handle_trade_zones(callback_query: types.CallbackQuery):
+    data = callback_query.data.split(':')
+    user_id = int(data[1])
+    action = data[2] # "show"
+    
+    if user_id not in trade_sessions:
+        return await callback_query.answer("⚠️ انتهت الجلسة.")
+
+    # تفعيل عرض المناطق في الجلسة
+    trade_sessions[user_id]['show_zones'] = True
+    
+    # تحديث الواجهة فوراً لإظهار أزرار الأسعار
+    await update_trade_ui(callback_query)
+    await callback_query.answer("🎯 تم توليد مناطق الدخول")
+    
 
 @dp.callback_query_handler(Text(startswith='trade_confirm:'), state="*")
 async def process_trade_confirm(callback_query: types.CallbackQuery):
