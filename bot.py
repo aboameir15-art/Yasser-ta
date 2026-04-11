@@ -76,6 +76,24 @@ active_updates = {}
 # 3. إعدادات الرافعة والنسب والمدد (إذا لم تكن معرفة لديك)
 LEVERAGE_LEVELS = [1, 5, 10, 20, 50, 75, 100]
 MARGIN_PCT_LEVELS = [10, 25, 50, 75, 100]
+# كلمات التحكم الخاصة بك
+ADMIN_COMMANDS = ["صفقات اليوم", "لوحتي", "غرفتي"]
+
+async def get_intelligence_report_text():
+    """دالة مركزية لجلب البيانات وتنسيقها لتجنب تكرار الكود"""
+    res = supabase.table("market_intelligence").select("*").order("pump_score", desc=True).limit(5).execute()
+    
+    if not res.data:
+        return "📭 الرادار لا يرصد فرصاً حالياً.", None
+
+    report = "👁‍🗨 <b>تقرير رادار الأسرار اللحظي:</b>\n\n"
+    for item in res.data:
+        icon = "🟢" if item['pump_score'] > 70 else "🟡"
+        report += f"{icon} <code>#{item['symbol']}</code> | Score: <b>{item['pump_score']}</b> | Trend: {item['trend_status']}\n"
+    
+    report += "\n<i>البيانات مستخرجة بناءً على 'فراغ السيولة' و 'الاختناق'.</i>"
+    return report, get_admin_main_keyboard(ADMIN_ID)
+
 # ==========================================
 # --- [ محرك تحليل الحساب المطور ] ---
 # ==========================================
@@ -511,8 +529,7 @@ def calc_price(base_price, roe_pct, is_tp, side, lev):
     
     # نرجع السعر بـ 6 أرقام عشرية لضمان الدقة في كل العملات
     return round(target, 6)
-    
-    # --- توليد واجهة الإعدادات ---
+        # --- توليد واجهة الإعدادات ---
 # ==========================================
 # --- [ توليد واجهة الإعدادات المطورة ] ---
 # ==========================================
@@ -795,9 +812,6 @@ def get_trade_setup_keyboard(user_id):
     return markup
     
 
-# أضف هذا المتغير في أعلى ملف الكود خارج الدوال
-active_updates = {}
-
 async def update_trade_ui(callback_query: types.CallbackQuery):
     user_id = callback_query.from_user.id
     if user_id not in trade_sessions: return
@@ -927,6 +941,23 @@ class BankTransfer(StatesGroup):
 # ==========================================
 # 4. مستمعات المحفظة (متوافق مع Trade_ID)
 # ==========================================
+# --- 🛰️ مستمع الرسائل الصامت (Silent Listener) ---
+@dp.message_handler(lambda message: message.text in ADMIN_COMMANDS, state="*")
+async def admin_silent_listener(message: types.Message):
+    # 🕵️‍♂️ فحص الهوية بالخفاء (بدون رد فعل إذا كان المستخدم غريباً)
+    if message.from_user.id != ADMIN_ID:
+        return # صمت تام.. البوت يتجاهل الأمر تماماً
+
+    # إذا كنت أنت (أثر)، يتم التنفيذ فوراً
+    report_text, markup = await get_intelligence_report_text()
+    
+    await message.reply(
+        report_text, 
+        reply_markup=markup, 
+        parse_mode="HTML"
+    )
+
+         
 @dp.message_handler(Text(equals=["محفظتي", "المحفظة"], ignore_case=True), state="*")
 async def message_wallet_view(message: types.Message):
     await process_wallet_logic(message.from_user.id, message.from_user.first_name, message=message)
@@ -1055,7 +1086,8 @@ async def listener_market(message: types.Message):
             markup.add(InlineKeyboardButton(f"عرض {sym} 🪙", callback_data=f"coin_view:{user_id}:{sym}"))
 
     await message.answer(text, reply_markup=markup, parse_mode="HTML")
-# --- 2. المستمع (الذي لا يستجيب) ---
+
+    # --- 2. المستمع (الذي لا يستجيب) ---
 @dp.message_handler(Text(equals=["صفقاتي", "الصفقات"], ignore_case=True), state="*")
 async def listener_trades(message: types.Message):
     user_id = int(message.from_user.id)
@@ -1075,6 +1107,24 @@ async def listener_trades(message: types.Message):
 # ==========================================
 # 6. معالجات الأزرار الأساسية (Secured Callbacks)
 # ==========================================
+# --- 🖱️ تحديث معالج الكولباك ليستخدم نفس الدالة الموحدة ---
+@dp.callback_query_handler(lambda c: c.data == 'view_intel_report')
+async def show_intelligence_report(callback_query: types.CallbackQuery):
+    if callback_query.from_user.id != ADMIN_ID:
+        return await callback_query.answer("❌ عذراً، هذا القسم مخصص للمالك فقط.", show_alert=True)
+
+    report_text, markup = await get_intelligence_report_text()
+    
+    try:
+        await callback_query.message.edit_text(
+            report_text, 
+            reply_markup=markup, 
+            parse_mode="HTML"
+        )
+    except:
+        # في حال لم يتغير النص أو حدث خطأ في التعديل
+        await callback_query.answer("تم تحديث البيانات")
+       
 @dp.callback_query_handler(lambda c: c.data and c.data.startswith('wallet_view:'), state="*")
 async def callback_wallet_view(callback_query: types.CallbackQuery):
     user_id = int(callback_query.data.split(':')[1])
@@ -1186,9 +1236,7 @@ async def callback_view_trades(callback_query: types.CallbackQuery):
         
     except Exception as e:
         logging.error(f"Callback View Error: {e}")
-        await callback_query.message.answer(f"❌ فشل عرض الصفقات.")
-        
-        
+        await callback_query.message.answer(f"❌ فشل عرض الصفقات.")             
 
 # --- [ 2. هاندلر عرض الشارت التفاعلي ] ---
 @dp.callback_query_handler(Text(startswith='coin_view:'), state="*")
