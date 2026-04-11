@@ -1214,28 +1214,27 @@ async def process_coin_view(callback_query: types.CallbackQuery):
         data_parts = callback_query.data.split(':')
         owner_id = int(data_parts[1])
         symbol = data_parts[2]
-        
-        # التقاط الفريم، وإذا لم يكن موجوداً نعتبره 15m (للتوافق مع القديم)
         tf = data_parts[3] if len(data_parts) > 3 else "15m"
         visitor_id = callback_query.from_user.id
 
         if visitor_id != owner_id:
             return await callback_query.answer("⚠️ هذه البيانات ليست لك!", show_alert=True)
 
-        # جلب البيانات
         res = supabase.table("crypto_market_simulation").select("*").eq("symbol", symbol).execute()
         if not res.data:
             return await callback_query.answer("⚠️ العملة غير موجودة!", show_alert=True)
             
         coin = res.data[0]
-        
-        # استخراج البيانات الأساسية
         price = float(coin.get('current_price', 0))
-        high = float(coin.get('high_24h', 0))
-        low = float(coin.get('low_24h', 0))
+        high = float(coin.get('high_24h', 0)) # تم إرجاع أعلى سعر
+        low = float(coin.get('low_24h', 0))   # تم إرجاع أدنى سعر
         change = float(coin.get('change_24h', 0))
         
-        # استخراج مؤشرات الفريم المحدد
+        # بيانات السيولة للفريم المحدد
+        vol_current = float(coin.get(f'volume_{tf}', 0))
+        obv_current = float(coin.get(f'obv_{tf}', 0))
+        
+        # مؤشرات الشارت
         ema20 = float(coin.get(f'ema_20_{tf}', price))
         ema50 = float(coin.get(f'ema_50_{tf}', price))
         ema100 = float(coin.get(f'ema_100_{tf}', price))
@@ -1243,12 +1242,11 @@ async def process_coin_view(callback_query: types.CallbackQuery):
         bb_mid = float(coin.get(f'bb_middle_{tf}', price))
         bb_low = float(coin.get(f'bb_lower_{tf}', price))
         rsi = float(coin.get(f'rsi_{tf}', 50))
-        vol_ma = float(coin.get(f'volume_ma_{tf}', 0))
-        vol_current = float(coin.get('volume_24h', 0)) # سيولة 24 ساعة للتبسيط
 
         def f_num(val): return f"{val:,.4f}" if val < 1 else f"{val:,.2f}"
+        vol_color = "🟩" if change >= 0 else "🟥"
 
-        # 🧠 [ خوارزمية الترتيب الديناميكي للشارت ] 🧠
+        # ترتيب الشارت الديناميكي
         chart_elements = [
             {"name": "البولنجر العلوي", "val": bb_up, "icon": "🟡"},
             {"name": "البولنجر الأوسط", "val": bb_mid, "icon": "⚪"},
@@ -1258,39 +1256,25 @@ async def process_coin_view(callback_query: types.CallbackQuery):
             {"name": "خط EMA 20", "val": ema20, "icon": "🔴"},
             {"name": "سعر العملة الحالي", "val": price, "icon": "💵"}
         ]
-        # ترتيب العناصر من الأعلى سعراً إلى الأدنى (محاكاة الشارت)
         chart_elements.sort(key=lambda x: x["val"], reverse=True)
 
-        # 📊 [ ترتيب مؤشر الـ RSI ]
-        rsi_text = "====================\n📈: مؤشر RSI 14\n"
-        if rsi >= 78:
-            rsi_text += f"📈: <b>{rsi:.1f}</b> (🔥 تشبع شرائي)\n®: خط علوي 78\n®: خط سفلي 22\n"
-        elif rsi <= 22:
-            rsi_text += f"®: خط علوي 78\n®: خط سفلي 22\n📈: <b>{rsi:.1f}</b> (❄️ تشبع بيعي)\n"
-        else:
-            rsi_text += f"®: خط علوي 78\n📈: <b>{rsi:.1f}</b> (في المنتصف)\n®: خط سفلي 22\n"
-
-        # 💧 [ الفوليوم ]
-        vol_color = "🟩" if change >= 0 else "🟥"
-
-        # 📝 [ بناء الرسالة النهائية بناءً على قالبك ]
+        # 📝 [ بناء الرسالة النهائية الشاملة ]
         text = f"<b>{symbol.replace('USDT', '')} / USDT</b> | ⏱ {tf}\n"
         text += f"السعر الحالي: <code>{f_num(price)}</code> ({change:+.2f}%)\n"
         text += f"أعلى سعر: <code>{f_num(high)}</code>\n"
         text += f"أدنى سعر: <code>{f_num(low)}</code>\n"
+        text += "----------------------\n"
+        # إضافة بيانات الفوليوم والـ OBV هنا
+        text += f"📊: أعمدة السيولة {vol_color} {{ <code>{vol_current:,.0f}</code> }}\n"
+        text += f"📈: مؤشر الـ OBV {{ <code>{obv_current:,.0f}</code> }}\n"
         text += "----------------------\n"
         
         for el in chart_elements:
             text += f"{el['icon']}: {el['name']} {{ <code>{f_num(el['val'])}</code> }}\n"
             
         text += "----------------------\n"
-        text += rsi_text
-        text += "====================\n"
-        text += f"📈: مؤشر الفوليوم (MA)\n"
-        text += f"📈: حجم المتوسط {{ <code>{vol_ma:,.0f}</code> }}\n"
-        text += "====================\n"
-        text += f"📊: أعمدة السيولة الحالية\n"
-        text += f"📊: الحجم {vol_color} {{ <code>{vol_current:,.0f}</code> }}\n"
+        text += f"📈: مؤشر RSI 14 {{ <b>{rsi:.1f}</b> }}\n"
+        text += "®: خط علوي 78 | ®: خط سفلي 22\n"
         text += "===================="
 
         await callback_query.message.edit_text(
@@ -1301,8 +1285,8 @@ async def process_coin_view(callback_query: types.CallbackQuery):
         await callback_query.answer()
     except Exception as e:
         print(f"Error: {e}")
-        await callback_query.answer("❌ حدث خطأ في معالجة الشارت.")
-
+        await callback_query.answer("❌ حدث خطأ في معالجة البيانات.")
+               
 # --- [ 3. هاندلر توصية VIP (قالب العنود / الدخول الهجومي) ] ---
 @dp.callback_query_handler(Text(startswith='vip_signal:'), state="*")
 async def process_vip_signal(callback_query: types.CallbackQuery):
