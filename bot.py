@@ -13,10 +13,10 @@ import httpx
 import aiohttp
 import arabic_reshaper
 import math
-from datetime import datetime, timedelta
+import pandas as pd
+import numpy as np
 from aiogram import types
 from datetime import datetime, timedelta # 💡 تمت الإضافة هنا
-from aiogram import types
 from aiogram.dispatcher.filters import Text 
 from pilmoji import Pilmoji 
 from PIL import Image, ImageDraw, ImageFont, ImageOps
@@ -218,6 +218,80 @@ async def trade_reaper():
             
         await asyncio.sleep(5)
         
+
+async def intelligence_scanner():
+    """
+    الماسح الاستخباراتي: فحص السوق، تطبيق الأسرار، وتحديث قاعدة البيانات.
+    """
+    print(f"🚀 {datetime.now().strftime('%H:%M:%S')} | بدأ الرادار في مسح أعماق السوق...")
+    
+    # 1. جلب قائمة العملات (أفضل 100 عملة من سوبابيس أو API)
+    coins_res = supabase.table("crypto_market_simulation").select("*").execute()
+    coins = coins_res.data
+
+    for coin in coins:
+        symbol = coin['symbol']
+        current_price = float(coin['current_price'])
+        
+        # محاكاة جلب البيانات التاريخية (EMA, RSI, Volume) للحساب
+        # ملاحظة: نستخدم إعداداتك الخاصة هنا (78/22 للـ RSI) و (20/50 للـ EMA)
+        data = await fetch_historical_data(symbol) # دالة جلب الشموع
+        
+        df = pd.DataFrame(data)
+        
+        # --- [تطبيق الأسرار] ---
+        
+        # السر الأول: فراغ السيولة (Liquidity Vacuum)
+        # إذا كان السعر يهبط ولكن الحجم ينكمش بشدة
+        price_change = df['close'].pct_change().iloc[-1]
+        vol_change = df['volume'].pct_change().iloc[-1]
+        is_vacuum = (price_change < -0.02) and (vol_change < -0.5)
+
+        # السر الثاني: الاختناق الانفجاري (Squeeze)
+        # حساب البولنجر باندز (الوسط أبيض كما طلبت)
+        df['std'] = df['close'].rolling(window=20).std()
+        df['upper'] = df['middle'] + (df['std'] * 2)
+        df['lower'] = df['middle'] - (df['std'] * 2)
+        squeeze_width = (df['upper'] - df['lower']) / df['middle']
+        is_squeezed = squeeze_width.iloc[-1] < 0.03 # نسبة ضيق شديدة
+
+        # السر الثالث: ارتداد فايبوناتشي الذهبي
+        high = df['high'].max()
+        low = df['low'].min()
+        fib_618 = high - (0.618 * (high - low))
+
+        # --- [نظام التقييم الذكي - Scoring] ---
+        score = 0
+        reasons = []
+
+        if is_vacuum: 
+            score += 40
+            reasons.append("🐳 رصد فراغ سيولة (تجميع مخفي)")
+        
+        if is_squeezed:
+            score += 30
+            reasons.append("🌋 اختناق سعري جاهز للانفجار")
+            
+        if df['rsi'].iloc[-1] < 22: # حدك السفلي الخاص
+            score += 20
+            reasons.append("🎯 منطقة تشبع بيعي فائقة")
+
+        # 2. تحديث جدول الاستخبارات (Intelligence Table)
+        supabase.table("market_intelligence").upsert({
+            "symbol": symbol,
+            "pump_score": score,
+            "is_squeezed": is_squeezed,
+            "fib_golden_ratio": fib_618,
+            "trend_status": "BULLISH" if df['ema20'].iloc[-1] > df['ema50'].iloc[-1] else "BEARISH",
+            "last_updated": datetime.now().isoformat()
+        }).execute()
+
+        # 3. إطلاق الإنذار إذا تجاوزت النتيجة 85
+        if score >= 85:
+            await trigger_golden_signal(symbol, score, reasons, fib_618)
+
+    print("✅ تم الانتهاء من دورة المسح وتحديث الأهداف.")
+    
 # ==========================================
 # 1. الدوال الحسابية الأساسية (Math Core)
 # ==========================================
