@@ -203,84 +203,82 @@ async def trade_reaper():
         except Exception as global_e:
             logging.error(f"❌ Reaper Global Panic: {global_e}")
             
-        await asyncio.sleep(4) # وقت مثالي لضمان تحديث سريع وحماية من الحظر
+        await asyncio.sleep(5) # وقت مثالي لضمان تحديث سريع وحماية من الحظر
 
         
-
 async def intelligence_scanner():
     """
-    الماسح الاستخباراتي: فحص السوق، تطبيق الأسرار، وتحديث قاعدة البيانات.
+    الماسح الاستخباراتي: يحلل البيانات الجاهزة في سوبابيس (بدون جلب بيانات خارجية)
     """
-    print(f"🚀 {datetime.now().strftime('%H:%M:%S')} | بدأ الرادار في مسح أعماق السوق...")
+    print(f"🚀 {datetime.now().strftime('%H:%M:%S')} | بدأ الرادار في تحليل أعماق قاعدة البيانات...")
     
-    # 1. جلب قائمة العملات (أفضل 100 عملة من سوبابيس أو API)
-    coins_res = supabase.table("crypto_market_simulation").select("*").execute()
-    coins = coins_res.data
+    try:
+        # 1. جلب البيانات التي قام "المصنع" برفعها وتجهيزها (المؤشرات موجودة هنا بالفعل)
+        res = supabase.table("crypto_market_simulation").select("*").execute()
+        coins = res.data
+        if not coins: 
+            print("⚠️ لا توجد بيانات في جدول المحاكاة حالياً.")
+            return
 
-    for coin in coins:
-        symbol = coin['symbol']
-        current_price = float(coin['current_price'])
-        
-        # محاكاة جلب البيانات التاريخية (EMA, RSI, Volume) للحساب
-        # ملاحظة: نستخدم إعداداتك الخاصة هنا (78/22 للـ RSI) و (20/50 للـ EMA)
-        data = await fetch_historical_data(symbol) # دالة جلب الشموع
-        
-        df = pd.DataFrame(data)
-        
-        # --- [تطبيق الأسرار] ---
-        
-        # السر الأول: فراغ السيولة (Liquidity Vacuum)
-        # إذا كان السعر يهبط ولكن الحجم ينكمش بشدة
-        price_change = df['close'].pct_change().iloc[-1]
-        vol_change = df['volume'].pct_change().iloc[-1]
-        is_vacuum = (price_change < -0.02) and (vol_change < -0.5)
+        for coin in coins:
+            symbol = coin['symbol']
+            score = 0
+            reasons = []
 
-        # السر الثاني: الاختناق الانفجاري (Squeeze)
-        # حساب البولنجر باندز (الوسط أبيض كما طلبت)
-        df['std'] = df['close'].rolling(window=20).std()
-        df['upper'] = df['middle'] + (df['std'] * 2)
-        df['lower'] = df['middle'] - (df['std'] * 2)
-        squeeze_width = (df['upper'] - df['lower']) / df['middle']
-        is_squeezed = squeeze_width.iloc[-1] < 0.03 # نسبة ضيق شديدة
+            # --- [ تم حذف الاعتماد على fetch_historical_data و pandas ] ---
+            # --- [ سنعتمد على الأعمدة التي رفعها 'المصنع' في الجدول مباشرة ] ---
 
-        # السر الثالث: ارتداد فايبوناتشي الذهبي
-        high = df['high'].max()
-        low = df['low'].min()
-        fib_618 = high - (0.618 * (high - low))
-
-        # --- [نظام التقييم الذكي - Scoring] ---
-        score = 0
-        reasons = []
-
-        if is_vacuum: 
-            score += 40
-            reasons.append("🐳 رصد فراغ سيولة (تجميع مخفي)")
-        
-        if is_squeezed:
-            score += 30
-            reasons.append("🌋 اختناق سعري جاهز للانفجار")
+            # السر الأول: الاختناق الانفجاري (Squeeze)
+            # نستخدم قيم البولنجر التي رفعها المصنع للفريم 15 دقيقة
+            upper = float(coin.get('bb_upper_15m', 0))
+            lower = float(coin.get('bb_lower_15m', 0))
+            middle = float(coin.get('bb_middle_15m', 1)) 
             
-        if df['rsi'].iloc[-1] < 22: # حدك السفلي الخاص
-            score += 20
-            reasons.append("🎯 منطقة تشبع بيعي فائقة")
+            if middle > 0:
+                squeeze_width = (upper - lower) / middle
+                if 0 < squeeze_width < 0.03: 
+                    score += 40
+                    reasons.append("🌋 اختناق سعري جاهز للانفجار")
 
-        # 2. تحديث جدول الاستخبارات (Intelligence Table)
-        supabase.table("market_intelligence").upsert({
-            "symbol": symbol,
-            "pump_score": score,
-            "is_squeezed": is_squeezed,
-            "fib_golden_ratio": fib_618,
-            "trend_status": "BULLISH" if df['ema20'].iloc[-1] > df['ema50'].iloc[-1] else "BEARISH",
-            "last_updated": datetime.now().isoformat()
-        }).execute()
+            # السر الثاني: تشبع البيع الفائق (RSI < 22)
+            rsi_val = float(coin.get('rsi_15m', 50))
+            if rsi_val < 22:
+                score += 30
+                reasons.append("🎯 منطقة تشبع بيعي فائقة (RSI < 22)")
 
-        # 3. إطلاق الإنذار إذا تجاوزت النتيجة 85
-        if score >= 85:
-            await trigger_golden_signal(symbol, score, reasons, fib_618)
+            # السر الثالث: اتجاه القوة (EMA 20 > 50)
+            ema20 = float(coin.get('ema_20_15m', 0))
+            ema50 = float(coin.get('ema_50_15m', 0))
+            if ema20 > ema50 and ema50 > 0:
+                score += 20
+                reasons.append("📈 اتجاه صاعد (Golden Cross)")
+
+            # حساب النسبة الذهبية (0.618) بناءً على هاي ولو الـ 24 ساعة المرفوعين
+            high_24h = float(coin.get('high_24h', 0))
+            low_24h = float(coin.get('low_24h', 0))
+            fib_618 = high_24h - (0.618 * (high_24h - low_24h))
+
+            # --- [ تحديث قاعدة البيانات وإرسال الإشارة ] ---
+
+            if score > 0:
+                # تحديث جدول الاستخبارات بالنتيجة
+                supabase.table("market_intelligence").upsert({
+                    "symbol": symbol,
+                    "pump_score": score,
+                    "is_squeezed": (score >= 40),
+                    "fib_golden_ratio": fib_618,
+                    "trend_status": "BULLISH" if ema20 > ema50 else "BEARISH",
+                    "last_updated": "now()"
+                }).execute()
+
+            # إطلاق الإنذار الذهبي إذا تجاوزت النتيجة 85
+            if score >= 85:
+                await trigger_golden_signal(symbol, score, reasons, fib_618)
+
+    except Exception as e:
+        logging.error(f"❌ خطأ داخلي في الماسح الاستخباراتي: {e}")
 
     print("✅ تم الانتهاء من دورة المسح وتحديث الأهداف.")
-
-
 
 async def trigger_golden_signal(symbol, score, reasons, fib_618):
     """صياغة وإرسال الإنذار الذهبي للآدمن فقط"""
