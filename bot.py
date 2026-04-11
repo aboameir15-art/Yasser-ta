@@ -127,113 +127,82 @@ async def get_trading_account_snapshot(user_id):
         # التعامل مع الخطأ
         return {"free_cash": 0, "used_margin": 0, "total_balance": 0, "total_pnl": 0, "total_equity": 0}
               
-
 async def trade_reaper():
     """
-    رادار التصفية الشاملة + منفذ الطلبات المعلقة
+    رادار التصفية المحصن + منفذ الطلبات المعلقة
     """
     while True:
         try:
-            # --- الجزء الأول: جلب كافة البيانات من قاعدة البيانات ---
-            # جلب الصفقات (نشطة ومعلقة)
-            trades_res = supabase.table("active_trades").select("*").execute()
-            all_trades = trades_res.data
-            
-            # جلب أسعار السوق الحالية
-            market_res = supabase.table("crypto_market_simulation").select("symbol, current_price").execute()
-            market_prices = {item['symbol']: float(item['current_price']) for item in market_res.data}
+            # 1. جلب البيانات مع محاولة المعالجة (Error Handling)
+            try:
+                trades_res = supabase.table("active_trades").select("*").execute()
+                all_trades = trades_res.data
+                
+                market_res = supabase.table("crypto_market_simulation").select("symbol, current_price").execute()
+                market_prices = {item['symbol']: float(item['current_price']) for item in market_res.data}
+            except Exception as db_err:
+                # إذا حدث خطأ 502 أو مشكلة في الشبكة، انتظر قليلاً وكرر المحاولة بصمت
+                logging.warning(f"⚠️ سوبابيس مشغول (502/Network). استراحة 5 ثوانٍ... {db_err}")
+                await asyncio.sleep(5)
+                continue
 
             if not all_trades:
                 await asyncio.sleep(5)
                 continue
 
-            # تصنيف الصفقات (نشطة للمراقبة، ومعلقة للتنفيذ)
-            active_trades_by_user = {}
+            # --- [نفس المنطق الخاص بك في التصنيف] ---
             pending_trades = [t for t in all_trades if not t['is_active']]
-            active_trades_list = [t for t in all_trades if t['is_active']]
-
-            # تجميع الصفقات النشطة حسب المستخدم لحساب التصفية
-            for t in active_trades_list:
+            active_trades_by_user = {}
+            for t in [x for x in all_trades if x['is_active']]:
                 uid = t['user_id']
                 if uid not in active_trades_by_user: active_trades_by_user[uid] = []
                 active_trades_by_user[uid].append(t)
 
-            # --- الجزء الثاني: تنفيذ الطلبات المعلقة (Limit Orders) ---
+            # --- [الجزء الثاني: تنفيذ الأوامر المعلقة] ---
             for pt in pending_trades:
                 sym = pt['symbol']
                 target_p = float(pt['entry_price'])
                 current_p = market_prices.get(sym)
-                side = pt['side']
-                
                 if not current_p: continue
 
-                # شروط التنفيذ: 
-                # في الشراء (Long): يتفعل الطلب إذا نزل السعر للمنطقة أو تحتها
-                # في البيع (Short): يتفعل الطلب إذا صعد السعر للمنطقة أو فوقها
-                should_activate = False
-                if side == 'LONG' and current_p <= target_p:
-                    should_activate = True
-                elif side == 'SHORT' and current_p >= target_p:
-                    should_activate = True
-
-                if should_activate:
-                    # تحويل الصفقة إلى نشطة (True)
+                # منطق التفعيل (رادار القناص)
+                if (pt['side'] == 'LONG' and current_p <= target_p) or \
+                   (pt['side'] == 'SHORT' and current_p >= target_p):
+                    
+                    # تحديث الحالة مع التأكد من التنفيذ
                     supabase.table("active_trades").update({"is_active": True}).eq("trade_id", pt['trade_id']).execute()
-                    await bot.send_message(
-                        pt['user_id'],
-                        f"⚡ <b>تـم تـفـعـيـل الـطـلـب الـمـعـلـق!</b>\n\n"
-                        f"العملة: #{sym}\n"
-                        f"سعر الدخول المختار: <code>{target_p:,.4f}$</code>\n"
-                        f"سعر السوق الحالي: <code>{current_p:,.4f}$</code>\n"
-                        f"الصفقة الآن قيد التداول 🚀",
-                        parse_mode="HTML"
-                    )
+                    await bot.send_message(pt['user_id'], f"⚡ <b>تـم تـفـعـيـل الـطـلـب!</b>\n#{sym} بدأت العمل الآن 🚀", parse_mode="HTML")
 
-            # --- الجزء الثالث: رادار التصفية الشاملة (حذف السجلات) ---
+            # --- [الجزء الثالث: رادار الإبادة (التصفية)] ---
             for uid, trades in active_trades_by_user.items():
-                user_res = supabase.table("users_global_profile").select("bank_balance").eq("user_id", uid).execute()
-                if not user_res.data: continue
-                
-                bank_balance = float(user_res.data[0].get('bank_balance', 0.0))
-                total_used_margin = 0.0
-                total_unrealized_pnl = 0.0
-                
-                for t in trades:
-                    sym = t['symbol']
-                    entry = float(t['entry_price'])
-                    margin = float(t['margin'])
-                    lev = float(t['leverage'])
-                    current_p = market_prices.get(sym, entry)
-
-                    total_used_margin += margin
-                    pnl_pct = (current_p - entry) / entry if t['side'] == 'LONG' else (entry - current_p) / entry
-                    total_unrealized_pnl += (margin * pnl_pct * lev)
-
-                total_account_balance = bank_balance + total_used_margin
-                
-                # 💀 قرار الإعدام (التصفية)
-                if total_unrealized_pnl <= -total_account_balance:
-                    # 1. تصفير الحساب والديون في البروفايل
-                    supabase.table("users_global_profile").update({
-                        "bank_balance": 0.0,
-                        "debt_balance": 0.0
-                    }).eq("user_id", uid).execute()
+                try:
+                    user_res = supabase.table("users_global_profile").select("bank_balance").eq("user_id", uid).execute()
+                    if not user_res.data: continue
                     
-                    # 2. حذف (مسح) كافة الصفقات النشطة لهذا المستخدم نهائياً
-                    supabase.table("active_trades").delete().eq("user_id", uid).eq("is_active", True).execute()
+                    bank_balance = float(user_res.data[0].get('bank_balance', 0.0))
+                    total_used_margin = 0.0
+                    total_unrealized_pnl = 0.0
                     
-                    await bot.send_message(
-                        uid, 
-                        f"💀 <b>تـصـفـيـة شـامـلـة (إبادة الحساب)!</b>\n\n"
-                        f"تم مسح كافة صفقاتك النشطة وتصفير رصيدك وقرضك بسبب تجاوز الخسائر للضمان المتاح.\n"
-                        f"يمكنك البدء من جديد الآن.",
-                        parse_mode="HTML"
-                    )
+                    for t in trades:
+                        sym, entry, margin, lev = t['symbol'], float(t['entry_price']), float(t['margin']), float(t['leverage'])
+                        current_p = market_prices.get(sym, entry)
+                        total_used_margin += margin
+                        pnl_pct = (current_p - entry) / entry if t['side'] == 'LONG' else (entry - current_p) / entry
+                        total_unrealized_pnl += (margin * pnl_pct * lev)
 
-        except Exception as e:
-            logging.error(f"❌ Reaper/Executor Error: {e}")
+                    # 💀 قرار الإعدام: إذا تجاوزت الخسارة الضمان
+                    if total_unrealized_pnl <= -(bank_balance + total_used_margin):
+                        # تصفير وحذف (تطهير الحساب)
+                        supabase.table("users_global_profile").update({"bank_balance": 0.0, "debt_balance": 0.0}).eq("user_id", uid).execute()
+                        supabase.table("active_trades").delete().eq("user_id", uid).eq("is_active", True).execute()
+                        await bot.send_message(uid, "💀 <b>تـصـفـيـة كـامـلـة!</b>\nتبخرت المحفظة.. ابدأ من جديد يا بطل.", parse_mode="HTML")
+                except: continue # تخطي أي مستخدم فيه مشكلة فنية
+
+        except Exception as global_e:
+            logging.error(f"❌ Reaper Global Panic: {global_e}")
             
-        await asyncio.sleep(5)
+        await asyncio.sleep(4) # وقت مثالي لضمان تحديث سريع وحماية من الحظر
+
         
 
 async def intelligence_scanner():
