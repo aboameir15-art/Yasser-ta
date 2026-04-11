@@ -1394,7 +1394,7 @@ async def process_trade_confirm(callback_query: types.CallbackQuery):
         print(f"Trade Confirmation Error: {e}")
         await callback_query.answer("❌ فشل تنفيذ الصفقة.")
         
- @dp.callback_query_handler(Text(startswith='pending_trades_view:'), state="*")
+@dp.callback_query_handler(Text(startswith='pending_trades_view:'), state="*")
 async def pending_trades_view(callback_query: types.CallbackQuery):
     data_parts = callback_query.data.split(':')
     owner_id = int(data_parts[1])
