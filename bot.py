@@ -2231,13 +2231,45 @@ async def fetch_klines(session, symbol, interval, limit=100):
             if res.status == 200: return await res.json()
     except: return None
 
+
+def calculate_volume(volumes):
+    """
+    تعيد حجم التداول للشمعة الحالية (العمود الأخير)
+    هذا هو المحرك الذي يكشف دخول السيولة المفاجئ.
+    """
+    if not volumes: return 0.0
+    
+    # جلب حجم تداول الشمعة الأخيرة (آخر عمود في الشارت)
+    current_volume = float(volumes[-1])
+    
+    return current_volume
+    
+def calculate_obv(closes, volumes):
+    """
+    حساب مؤشر حجم التداول المتوازن (OBV)
+    يعتمد على العلاقة بين سعر الإغلاق وحجم التداول
+    """
+    if len(closes) < 2: return 0.0
+    
+    obv = 0.0
+    # نبدأ الحساب بمقارنة كل شمعة بالتي قبلها
+    for i in range(1, len(closes)):
+        if closes[i] > closes[i-1]:
+            # إغلاق صاعد: أضف الفوليوم
+            obv += volumes[i]
+        elif closes[i] < closes[i-1]:
+            # إغلاق هابط: اطرح الفوليوم
+            obv -= volumes[i]
+        # إذا تساوى الإغلاق يبقى الـ OBV كما هو دون تغيير
+            
+    return obv
+    
 # --- [ 3. دالة الجلب والتحليل ] ---
 async def update_crypto_market_data():
-    print(f"\n🚀 {datetime.now().strftime('%H:%M:%S')} | بدء جلب بيانات Binance Vision...")
+    print(f"\n🚀 {datetime.now().strftime('%H:%M:%S')} | بدء جلب بيانات Binance Vision (شاملة OBV والفوليوم)...")
     
     async with aiohttp.ClientSession() as session:
         try:
-            # تم تعديل التايم أوت هنا أيضاً
             async with session.get("https://data-api.binance.vision/api/v3/ticker/24hr", timeout=10) as res:
                 if res.status != 200: return
                 ticker_data = await res.json()
@@ -2246,7 +2278,15 @@ async def update_crypto_market_data():
             logging.error(f"❌ فشل الاتصال بـ API: {e}")
             return
 
-        top_coins = [c for c in ticker_data if isinstance(c, dict) and c.get('symbol', '').endswith('USDT') and float(c.get('lastPrice', 0)) >= 1.0]
+        # --- [ تعديل الفلتر: السعر يبدأ من 0.003 فما فوق ] ---
+        top_coins = [
+            c for c in ticker_data 
+            if isinstance(c, dict) 
+            and c.get('symbol', '').endswith('USDT') 
+            and float(c.get('lastPrice', 0)) >= 0.003
+        ]
+        
+        # ترتيب حسب أعلى سيولة (Quote Volume) واختيار أعلى 100 عملة
         top_coins = sorted(top_coins, key=lambda x: float(x.get('quoteVolume', 0)), reverse=True)[:100]
         
         timeframes = ['15m', '1h', '2h', '4h', '1d']
@@ -2279,7 +2319,12 @@ async def update_crypto_market_data():
                     if results[i] and isinstance(results[i], list):
                         closes = [float(k[4]) for k in results[i]]
                         volumes = [float(k[5]) for k in results[i]]
+                        
+                        # --- [ الحسابات الاستخباراتية الجديدة ] ---
                         upper, mid, lower = calculate_bollinger(closes)
+                        obv_val = calculate_obv(closes, volumes)  # دالة OBV
+                        curr_vol = float(volumes[-1])             # دالة Volume (آخر عمود)
+
                         record.update({
                             f"ema_20_{tf}": calculate_ema(closes, 20),
                             f"ema_50_{tf}": calculate_ema(closes, 50),
@@ -2288,17 +2333,22 @@ async def update_crypto_market_data():
                             f"bb_upper_{tf}": upper, 
                             f"bb_middle_{tf}": mid, 
                             f"bb_lower_{tf}": lower,
-                            f"volume_ma_{tf}": sum(volumes[-20:]) / 20
+                            f"volume_ma_{tf}": sum(volumes[-20:]) / 20,
+                            f"volume_{tf}": curr_vol,  # إضافة الحجم الحالي للسوبابيس
+                            f"obv_{tf}": obv_val       # إضافة OBV للسوبابيس
                         })
                 final_records.append(record)
-            except Exception as e: continue
+            except Exception as e: 
+                logging.error(f"❌ خطأ في معالجة {symbol}: {e}")
+                continue
 
         if final_records:
-            print(f"📦 جاري رفع {len(final_records)} عملة إلى سوبابيس...")
-            for i in range(0, len(final_records), 10):
+            print(f"📦 جاري رفع {len(final_records)} عملة (استخبارات كاملة) إلى سوبابيس...")
+            for i in range(0, len(final_records), 20):
                 await async_manual_upsert("crypto_market_simulation", final_records[i:i + 10])
     
     print(f"✅ {datetime.now().strftime('%H:%M:%S')} | تم التحديث بنجاح.")
+    
 
 # --- [ 4. حلقة التشغيل التلقائي ] ---
 async def market_updater_background_task():
