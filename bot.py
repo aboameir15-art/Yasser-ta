@@ -2310,7 +2310,7 @@ async def market_updater_background_task():
             await asyncio.sleep(120) 
         except Exception as e:
             logging.error(f"Market Updater Loop Error: {e}")
-            await asyncio.sleep(30) # انتظار أقصر عند حدوث خطأ للتعافي السريع
+            await asyncio.sleep(120) # انتظار أقصر عند حدوث خطأ للتعافي السريع
 
 
 # ==========================================
@@ -2355,6 +2355,23 @@ async def self_resuscitation():
         # اجعلها كل 4 دقائق (240 ثانية) - كن "مزعجاً" لسيرفر ريندر لكي لا ينام
         await asyncio.sleep(240)
         
+async def run_intelligence_radar():
+    """المحرك الرئيسي لتشغيل الرادار بانتظام"""
+    print("📡 رادار الأسرار الاستخباراتي قيد التحضير...")
+    while True:
+        try:
+            # تشغيل الماسح
+            await intelligence_scanner()
+            
+            # وقت الانتظار بين كل دورة مسح كاملة (مثلاً 5 دقائق)
+            # يمكنك تقليلها لـ 3 دقائق إذا كان السيرفر سريعاً
+            await asyncio.sleep(300) 
+            
+        except Exception as e:
+            # في حال حدوث خطأ 502 أو مشكلة اتصال، ينتظر 10 ثوانٍ ويعيد المحاولة
+            logging.error(f"⚠️ تنبيه: تعثر الرادار مؤقتاً، إعادة المحاولة قريباً... {e}")
+            await asyncio.sleep(10)
+            
 async def main_startup():
     # أ) إعداد سيرفر الويب (لبقاء البوت متصلاً على Render)
     app = web.Application()
@@ -2368,19 +2385,22 @@ async def main_startup():
     await site.start()
     logging.info(f"🌐 Server started on port {port}")
 
-    # ب) تشغيل محركات التداول في الخلفية
-    # ب) تشغيل محركات التداول في الخلفية
-    logging.info("⏳ جاري تشغيل محركات السوق والرادار...")
+    # ب) تشغيل محركات التداول والاستخبارات في الخلفية
+    logging.info("⏳ جاري إقلاع وحش التداول ومركز الاستخبارات...")
     
-    # 1. محرك تصفية الصفقات (الذي أرسلته أنت)
+    # 1. محرك تصفية الصفقات (الـ Reaper المطور)
     asyncio.create_task(trade_reaper()) 
     
-    # 2. محرك تحديث الأسعار والمؤشرات من بينانس (الجديد)
+    # 2. محرك تحديث الأسعار اللحظية من بينانس
     asyncio.create_task(market_updater_background_task())
+
+    # 3. 🛡️ رادار الأسرار الاستخباراتي (الجديد)
+    # هذا المحرك سيفحص "فراغ السيولة" و "الاختناق" ويرسل لك الإنذارات الذهبية
+    asyncio.create_task(run_intelligence_radar())
 
     # ج) تشغيل البوت (لإصدار Aiogram 2.x)
     try:
-        logging.info("🚀 جاري إقلاع محرك التليجرام...")
+        logging.info("🚀 جاري إقلاع محرك التليجرام... الرادار الآن تحت سيطرتك يا أثر.")
         
         # 1. تخطي الرسائل القديمة المتراكمة أثناء الإيقاف
         await dp.skip_updates()
@@ -2396,8 +2416,7 @@ async def main_startup():
         await bot.close()
         await dp.storage.close()
         await dp.storage.wait_closed()
-
-
+        
 if __name__ == '__main__':
     # دمج جميع العمليات في مسار واحد (Event Loop) يمنع التضارب
     loop = asyncio.get_event_loop()
