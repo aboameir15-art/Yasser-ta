@@ -1325,20 +1325,21 @@ async def process_trade_cycle(callback_query: types.CallbackQuery):
     await update_trade_ui(callback_query)
 
 @dp.callback_query_handler(Text(startswith='trade_zones:'), state="*")
-async def handle_trade_zones(callback_query: types.CallbackQuery):
+async def handle_trade_zones_activation(callback_query: types.CallbackQuery):
     data = callback_query.data.split(':')
     user_id = int(data[1])
-    action = data[2] # "show"
     
     if user_id not in trade_sessions:
-        return await callback_query.answer("⚠️ انتهت الجلسة.")
+        return await callback_query.answer("⚠️ الجلسة منتهية، يرجى إعادة الطلب.")
 
-    # تفعيل عرض المناطق في الجلسة
+    # 1. تفعيل مفتاح عرض المناطق في الجلسة
     trade_sessions[user_id]['show_zones'] = True
     
-    # تحديث الواجهة فوراً لإظهار أزرار الأسعار
+    # 2. إرسال تنبيه سريع للمستخدم
+    await callback_query.answer("🎯 تم استخراج مستويات الدخول الذكية...")
+    
+    # 3. استدعاء دالة التحديث فوراً لتغيير شكل الكيبورد وإظهار المناطق
     await update_trade_ui(callback_query)
-    await callback_query.answer("🎯 تم توليد مناطق الدخول")
     
 
 @dp.callback_query_handler(Text(startswith='trade_confirm:'), state="*")
