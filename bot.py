@@ -1348,6 +1348,7 @@ async def process_coin_view(callback_query: types.CallbackQuery):
         await callback_query.answer("❌ حدث خطأ في معالجة البيانات.")
                
 # --- [ 3. هاندلر توصية VIP (قالب العنود / الدخول الهجومي) ] ---
+# --- [ 3. هاندلر توصية VIP (قالب الدخول الهجومي الذكي) ] ---
 @dp.callback_query_handler(Text(startswith='vip_signal:'), state="*")
 async def process_vip_signal(callback_query: types.CallbackQuery):
     try:
@@ -1364,84 +1365,103 @@ async def process_vip_signal(callback_query: types.CallbackQuery):
         c = res.data[0]
         price = float(c['current_price'])
         
-        # 🛡️ استخراج البيانات الاستخباراتية الجديدة
-        # فريم الساعة هو القائد وفريم 15د هو القناص
-        ema50_1d = float(c.get('ema_50_1d', price))
-        ema20_1h = float(c.get('ema_20_1h', price))
-        rsi_1h = float(c.get('rsi_1h', 50))
+        # 🕵️‍♂️ [ استدعاء الأسلحة الاستخباراتية الثقيلة من سوبابيس ]
+        # المتوسطات الحيوية (الدخول الهجومي يعتمد عليها)
+        ema20_15m = float(c.get('ema_20_15m', price))
+        ema50_15m = float(c.get('ema_50_15m', price))
         
-        # بيانات السيولة (الأسلحة الجديدة)
-        obv_1h = float(c.get('obv_1h', 0))
-        obv_15m = float(c.get('obv_15m', 0))
-        vol_1h = float(c.get('volume_1h', 0))
-        vol_ma_1h = float(c.get('volume_ma_1h', 1))
-
-        # 🎯 حساب الأهداف بناءً على "تذبذب" العملة (ATR مبسط)
-        # إذا كانت العملة رخيصة جداً، نوسع الأهداف قليلاً
-        spread = 0.02 if price > 1 else 0.03
-
-        # 🧠 منطق "الدخول الهجومي الذكي"
-        # الشرط: السعر فوق EMA50 اليومي (اتجاه صاعد) + RSI لم يصل للقمة (78) + OBV صاعد (سيولة حقيقية)
-        is_bullish = price > ema50_1d and rsi_1h < 78 and obv_15m >= obv_1h / 4
+        # حدود الانفجار (البولنجر باندز)
+        bb_upper = float(c.get('bb_upper_15m', price * 1.02))
+        bb_lower = float(c.get('bb_lower_15m', price * 0.98))
         
-        if is_bullish:
-            # شراء (LONG) - استراتيجية "انفجار السيولة"
-            direction_text = "شراء (LONG) 🚀"
-            entry_1 = price if price <= ema20_1h * 1.005 else ema20_1h
-            entry_2 = entry_1 * 0.992
-            dca = entry_1 * 0.97
-            sl = dca * 0.985
-            # أهداف مبنية على زخم السيولة (إذا الفوليوم عالٍ، الأهداف أبعد)
-            multiplier = 1.5 if vol_1h > vol_ma_1h else 1.0
-            tp1 = price * (1 + (spread * multiplier))
-            tp2 = price * (1 + (spread * 2 * multiplier))
-            tp3 = price * (1 + (spread * 4 * multiplier))
-            emoji_trend = "📈"
-            strategy_name = "انفجار السيولة 🌊"
-        else:
-            # بيع (SHORT) - استراتيجية "كسر القمة الوهمي"
-            direction_text = "بيع (SHORT) 📉"
+        # الفلاتر الزمنية والسيولة
+        rsi_15m = float(c.get('rsi_15m', 50))
+        obv_slope_15m = float(c.get('obv_slope_15m', 0))
+        obv_slope_4h = float(c.get('obv_slope_4h', 0))
+
+        # 🧠 [ منطق الدخول الهجومي (Aggressive Entry) ]
+        # نعتمد الشراء إذا السيولة تتدفق (+) والـ RSI لم يصل للتشبع المفرط (أقل من 78) والسعر محافظ على خطوطه
+        is_bullish = obv_slope_15m > 0 and rsi_15m < 78 and price >= ema50_15m * 0.99
+        
+        # فحص الفخ (Divergence): السعر يصعد ولكن الحيتان تصرف (OBV سالب)
+        is_fakeout = obv_slope_15m < 0 and rsi_15m > 22 and price < ema50_15m
+
+        if is_bullish or (not is_fakeout and rsi_15m > 50):
+            # 🟢 صفقة شراء (LONG) - استراتيجية قنص الارتدادات وانفجار السيولة
+            direction_text = "شراء (LONG)"
+            
+            # الدخول من نقطة السعر الحالية وحتى EMA 20 (دخول هجومي)
             entry_1 = price
-            entry_2 = entry_1 * 1.008
-            dca = entry_1 * 1.03
-            sl = dca * 1.015
-            tp1 = price * (1 - spread)
-            tp2 = price * (1 - (spread * 2))
-            tp3 = price * (1 - (spread * 4))
+            entry_2 = ema20_15m
+            if entry_1 < entry_2: entry_1, entry_2 = entry_2, entry_1 # ترتيب الأرقام
+            
+            # التعديل عند الدعم القوي جداً (EMA 50)
+            dca = ema50_15m
+            # وقف خسارة ضيق جداً (Tight SL) لضمان نسبة ربح لمخاطرة عالية
+            sl = dca * 0.985 
+            
+            # الأهداف تعتمد على اختراق خط البولنجر العلوي
+            tp1 = bb_upper if bb_upper > price else price * 1.015
+            tp2 = tp1 * 1.025
+            tp3 = tp1 * 1.055
+            
+            emoji_trend = "🚀"
+            emoji_target = "👉"
+            action_text = "اضغط أدناه وافتح صفقة شراء (Long) 📈"
+            liquidity_note = "صاعد بقوة 🐳" if obv_slope_4h > 0 else "تجميع لحظي ✅"
+            
+        else:
+            # 🔴 صفقة بيع (SHORT) - استراتيجية كسر الزخم
+            direction_text = "بيع (SHORT)"
+            
+            # دخول هجومي على المقاومة
+            entry_1 = price
+            entry_2 = ema20_15m
+            if entry_1 > entry_2: entry_1, entry_2 = entry_2, entry_1 
+            
+            dca = ema50_15m
+            sl = dca * 1.015 # وقف خسارة ضيق
+            
+            tp1 = bb_lower if bb_lower < price else price * 0.985
+            tp2 = tp1 * 0.975
+            tp3 = tp1 * 0.945
+            
             emoji_trend = "📉"
-            strategy_name = "تراجع الزخم ⚠️"
+            emoji_target = "👈"
+            action_text = "اضغط أدناه وافتح صفقة بيع (Short) 📉"
+            liquidity_note = "تخارج حيتان ⚠️" if obv_slope_4h < 0 else "تصريف لحظي 🔻"
 
-        def f_num(val): return f"{val:,.4f}" if val < 1 else f"{val:,.2f}"
+        # تنسيق الأرقام لتبدو كمنصات التداول
+        def f_num(val): return f"{val:.5f}".rstrip('0').rstrip('.') if val < 1 else f"{val:.4f}"
 
-        # 📝 القالب الاحترافي المطور (جاهز للنسخ)
-        signal_text = f"💎 <b>توصية VIP استخباراتية</b>\n"
-        signal_text += f"الاستراتيجية: <code>{strategy_name}</code>\n"
-        signal_text += f"----------------------\n"
-        signal_text += f"العملة: #{symbol} {emoji_trend}\n"
-        signal_text += f"النوع: <b>{direction_text}</b>\n"
-        signal_text += f"نطاق الدخول: <code>{f_num(entry_1)}</code> - <code>{f_num(entry_2)}</code>\n"
+        # 📝 القالب الذهبي (بناءً على طلبك والمسجل في البيانات)
+        signal_text = f"🔥 فرصة انفجار سعري: #{symbol} {emoji_trend}\n\n"
+        signal_text += f"{direction_text}: #{symbol} {emoji_trend}\n"
+        signal_text += f"نطاق الدخول: <code>{f_num(entry_2)}</code> - <code>{f_num(entry_1)}</code>\n"
         signal_text += f"تعديل المتوسط (DCA): <code>{f_num(dca)}</code>\n"
-        signal_text += f"وقف الخسارة (SL): <code>{f_num(sl)}</code>\n"
-        signal_text += f"----------------------\n"
-        signal_text += f"🎯 الأهداف الربحية:\n"
-        signal_text += f"1️⃣ الهدف الأول: <code>{f_num(tp1)}</code>\n"
-        signal_text += f"2️⃣ الهدف الثاني: <code>{f_num(tp2)}</code>\n"
-        signal_text += f"3️⃣ الهدف الثالث: <code>{f_num(tp3)}</code>\n"
-        signal_text += f"----------------------\n"
-        signal_text += f"💡 الحالة الفنية: RSI ({rsi_1h:.0f}) | OBV صاعد ✅\n"
-        signal_text += f"فتح صفقة {direction_text.split(' ')[0]} الآن {emoji_trend}"
-
+        signal_text += f"وقف الخسارة (SL): <code>{f_num(sl)}</code>\n\n"
+        signal_text += f"الأهداف:\n"
+        signal_text += f"{emoji_target} الهدف الأول: <code>{f_num(tp1)}</code>\n"
+        signal_text += f"{emoji_target} الهدف الثاني: <code>{f_num(tp2)}</code>\n"
+        signal_text += f"{emoji_target} الهدف الثالث: <code>{f_num(tp3)}</code>\n\n"
+        
+        # قسم التحليل السري
+        signal_text += f"💡 <b>التحليل الاستخباراتي:</b>\n"
+        signal_text += f"• مستوى RSI الحالي: <b>{rsi_15m:.0f}</b>\n"
+        signal_text += f"• بصمة السيولة (OBV): <b>{liquidity_note}</b>\n\n"
+        
+        signal_text += f"{action_text}\n\n"
+        
         back_kb = InlineKeyboardMarkup().add(
             InlineKeyboardButton("🔙 رجوع للشارت", callback_data=f"coin_view:{owner_id}:{symbol}:15m")
         )
 
         await callback_query.message.edit_text(signal_text, reply_markup=back_kb, parse_mode="HTML")
-        await callback_query.answer("💎 تم تحليل السيولة وإصدار التوصية")
+        await callback_query.answer("💎 تم توليد إشارة الهجوم الاستخباراتية!")
 
     except Exception as e:
         print(f"VIP Error: {e}")
-        await callback_query.answer("❌ تعذر توليد التوصية.")
-
+        await callback_query.answer("❌ تعذر توليد التوصية.", show_alert=True)
 # ==========================================
 # 7. معالجات دورة الصفقة (المطورة لدعم الفواصل والأمان)
 # ==========================================
