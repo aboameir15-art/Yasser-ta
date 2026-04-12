@@ -94,7 +94,8 @@ async def get_intelligence_report_text():
     report += "\n<i>البيانات مستخرجة بناءً على 'فراغ السيولة' و 'الاختناق'.</i>"
     return report, get_admin_main_keyboard(ADMIN_ID)
     
-# ==========================================
+
+    # ==========================================
 # --- [ محرك تحليل الحساب المطور ] ---
 # ==========================================
 async def get_trading_account_snapshot(user_id):
@@ -207,16 +208,15 @@ async def trade_reaper():
         
 async def intelligence_scanner():
     """
-    الماسح الاستخباراتي المتقدم v2.0 (رادار الحيتان)
-    يدمج تحليل السعر مع تحليل الجهد (Volume) والتراكم (OBV)
+    الرادار الاستخباراتي v4.0 (اللعنة الاستخباراتية)
+    يقرأ الهيكل، يكشف التجميع الصامت، ويطلق الإنذار المبكر من مستوى 70.
     """
-    print(f"🚀 {datetime.now().strftime('%H:%M:%S')} | بدأ الرادار في تشريح أعماق السيولة...")
+    print(f"🚀 {datetime.now().strftime('%H:%M:%S')} | الرادار يبحث عن الأسرار وتدفقات الحيتان (OBV)...")
     
     try:
         res = supabase.table("crypto_market_simulation").select("*").execute()
         coins = res.data
         if not coins: 
-            print("⚠️ لا توجد بيانات في جدول المحاكاة حالياً.")
             return
 
         for coin in coins:
@@ -224,84 +224,114 @@ async def intelligence_scanner():
             score = 0
             reasons = []
 
-            # 🛠️ استخراج البيانات من سوبابيس
+            # 🛠️ استخراج البيانات الحيوية من سوبابيس
             price = float(coin.get('current_price', 0))
+            price_change_24h = float(coin.get('change_24h', 0))
             
-            # بيانات السعر
+            # خطوط البولنجر (فريم 15 دقيقة)
             upper = float(coin.get('bb_upper_15m', 0))
             lower = float(coin.get('bb_lower_15m', 0))
             middle = float(coin.get('bb_middle_15m', 1))
-            rsi_15m = float(coin.get('rsi_15m', 50))
+            
+            # المتوسطات المتحركة
             ema20 = float(coin.get('ema_20_15m', 0))
             ema50 = float(coin.get('ema_50_15m', 0))
+            ema100 = float(coin.get('ema_100_15m', 0))
             
-            # 🚨 بيانات السيولة الاستخباراتية (الأسلحة الجديدة)
+            # السيولة التقليدية
             vol_15m = float(coin.get('volume_15m', 0))
             vol_ma_15m = float(coin.get('volume_ma_15m', 1))
-            obv_15m = float(coin.get('obv_15m', 0))
-            obv_1h = float(coin.get('obv_1h', 0))
+
+            # 🕵️‍♂️ [ استدعاء بيانات الجندي المجهول (OBV) ]
+            obv_current = float(coin.get('obv_15m', 0))
+            obv_prev = float(coin.get('obv_prev_15m', 0))
+            obv_slope_15m = float(coin.get('obv_slope_15m', 0))
+            obv_slope_1h = float(coin.get('obv_slope_1h', 0))
+            obv_slope_4h = float(coin.get('obv_slope_4h', 0))
 
             # ==========================================
-            # 🕵️‍♂️ [ محرك الأسرار وفك التشفير ]
+            # 📐 [ المحرك الفني: الهيكل السعري ]
             # ==========================================
 
-            # 1. السر الأول: الاختناق السعري (20 نقطة) - الهدوء الذي يسبق العاصفة
+            # 1. اختناق البولنجر [20 نقطة]
             if middle > 0:
                 squeeze_width = (upper - lower) / middle
-                if 0 < squeeze_width < 0.03: 
+                if 0 < squeeze_width < 0.025:
                     score += 20
-                    reasons.append("🌋 اختناق سعري جاهز للانفجار (Squeeze)")
+                    reasons.append("🌋 اختناق سعري (ضغط يسبق الانفجار)")
 
-            # 2. السر الثاني: انفجار الجهد الشرائي (35 نقطة) - أقوى مؤشر
-            # إذا كان الفوليوم الحالي أكبر من المتوسط بـ 250% (دخول حوت فوري)
-            if vol_ma_15m > 0 and vol_15m > (vol_ma_15m * 2.5):
-                score += 35
-                reasons.append(f"🐳 انفجار فوليوم ({vol_15m/vol_ma_15m:.1f}x ضعف المتوسط)")
-
-            # 3. السر الثالث: التجميع المخفي (25 نقطة) - قراءة النوايا
-            # إذا كان الـ OBV للفريم الصغير يخترق بشكل جنوني مقارنة بالفريم الأكبر
-            if obv_15m > 0 and obv_15m > (obv_1h / 4):
+            # 2. الترتيب الهجومي للخطوط [25 نقطة]
+            if ema20 > ema50 > ema100 and ema100 > 0:
                 score += 25
-                reasons.append("🌊 تجميع سيولة مخفي (OBV Bullish)")
+                reasons.append("🛡️ هيكل ترند صاعد (أحمر > أخضر > أزرق)")
 
-            # 4. السر الرابع: تأكيد الدخول الهجومي (20 نقطة)
-            if rsi_15m < 25:
+            # 3. شرارة الانفجار [20 نقطة]
+            if ema20 > middle > ema100:
                 score += 20
-                reasons.append("🎯 ارتداد قنص (RSI < 25)")
-            elif ema20 > ema50 and rsi_15m < 78:
+                reasons.append("⚡ شرارة الانفجار (الأحمر فوق الأبيض)")
+
+            # 4. الالتحام بالبولنجر العلوي [25 نقطة]
+            if price >= (upper * 0.998):
+                score += 25
+                reasons.append("🟡 السعر يلتحم بالخط الأصفر العلوي")
+
+            # 5. فوليوم الشموع [20 نقطة]
+            if vol_ma_15m > 0 and vol_15m > (vol_ma_15m * 1.5):
                 score += 20
-                reasons.append("⚔️ ترند هجومي (EMA 20 > 50)")
+                reasons.append(f"📊 فوليوم متزايد ({vol_15m/vol_ma_15m:.1f}x)")
+
+            # ==========================================
+            # ⚔️ [ شفرة الجندي المجهول (OBV): لعنة السوق ] ⚔️
+            # ==========================================
+
+            # 1. رصد التجميع الصامت (السعر مستقر والسيولة ترتفع)
+            if obv_slope_15m > 0 and abs(price_change_24h) < 1.0:
+                score += 30
+                reasons.append("🕵️‍♂️ تجميع صامت (OBV صاعد رغم ثبات السعر)")
+
+            # 2. رصد الانفجار المدعوم (اختراق السيولة)
+            if obv_slope_15m > 0 and obv_current > obv_prev:
+                score += 25
+                reasons.append("🔥 اندفاع سيولة ذكي (OBV Accumulation)")
+                
+                # تأكيد استراتيجي من الفريمات الكبيرة لقوة الضربة
+                if obv_slope_1h > 0 or obv_slope_4h > 0:
+                    score += 15
+                    reasons.append("🏛️ تأكيد استراتيجي: الحيتان تدعم من الفريمات الكبيرة")
+
+            # 3. فلتر الحماية (الدايفرجنس السلبي: كشف الفخاخ)
+            if obv_slope_15m < 0 and price_change_24h > 2.0:
+                score -= 60 
+                reasons.append("⚠️ فخ سعري: السعر يصعد والسيولة تخرج (تصريف!)")
 
             # ==========================================
 
-            # حساب النسبة الذهبية للارتداد
+            # حساب النسبة الذهبية (فيبوناتشي)
             high_24h = float(coin.get('high_24h', 0))
             low_24h = float(coin.get('low_24h', 0))
             fib_618 = high_24h - (0.618 * (high_24h - low_24h))
 
-            # تحديث جدول market_intelligence
-            if score > 0:
+            # 🚀 إرسال الإنذار الذهبي مبكراً من مستوى 70
+            if score >= 70:
                 supabase.table("market_intelligence").upsert({
                     "symbol": symbol,
                     "current_price": price,
-                    "volume_24h": vol_15m, # تخزين فوليوم الشمعة الانفجارية
-                    "avg_volume": vol_ma_15m,
-                    "rsi_value": rsi_15m,
                     "pump_score": score,
-                    "is_squeezed": (squeeze_width < 0.03 if middle > 0 else False),
+                    "obv_status": "SILENT_ACCUMULATION" if abs(price_change_24h) < 1.0 else "BREAKOUT",
+                    "liquidity_score": obv_slope_15m,
+                    "is_squeezed": True if 0 < (upper - lower) / middle < 0.025 else False,
                     "fib_golden_ratio": fib_618,
-                    "trend_status": "BULLISH" if ema20 > ema50 else "BEARISH",
+                    "trend_status": "TARGET_LOCKED",
                     "last_updated": "now()"
                 }).execute()
 
-            # 🚨 إطلاق الإنذار الذهبي للآدمن (لن يتم إطلاقه إلا إذا توافقت السيولة مع السعر)
-            if score >= 85:
+                # استدعاء دالة إرسال الإشارة إلى التليجرام
                 await trigger_golden_signal(symbol, score, reasons, fib_618, price)
 
     except Exception as e:
-        logging.error(f"❌ خطأ داخلي في الماسح الاستخباراتي: {e}")
+        logging.error(f"❌ خطأ داخلي في الرادار القناص: {e}")
 
-    print("✅ تم الانتهاء من دورة المسح وتحديث الأهداف.")
+    print("✅ تم الانتهاء من المسح الاستخباراتي.")
 
 # تحديث دالة التنبيه لتقبل السعر الحالي
 async def trigger_golden_signal(symbol, score, reasons, fib_618, price):
