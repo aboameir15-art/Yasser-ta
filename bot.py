@@ -2400,41 +2400,27 @@ async def update_crypto_market_data():
     print(f"✅ {datetime.now().strftime('%H:%M:%S')} | تم التحديث والحقن بنجاح.")
     
 
-# --- [ 4. حلقة التشغيل التلقائي ] ---
-async def market_updater_background_task():
-    """تعمل هذه الدالة في الخلفية لتحديث السوق كل 120 ثانية"""
+async def unified_trading_system():
+    """هذه الدالة هي المايسترو: تحديث البيانات -> انتظار دقيقة -> تحليل الرادار"""
     while True:
         try:
+            # أولاً: المصنع يشتغل ويحدث كل الفريمات والجندي المجهول
             await update_crypto_market_data()
-            print("⏳ أنتظر 120 ثانية قبل الجولة القادمة...\n")
-            await asyncio.sleep(120) 
-        except Exception as e:
-            logging.error(f"Market Updater Loop Error: {e}")
-            await asyncio.sleep(120) # انتظار أقصر عند حدوث خطأ للتعافي السريع
+            print("✅ المصنع أكمل الحقن بنجاح. انتظار 60 ثانية للرادار...")
+            await asyncio.sleep(20)
 
-async def run_intelligence_radar():
-    """
-    تعمل هذه الدالة في الخلفية لتشغيل ماسح الأسرار بانتظام
-    تنتظر 150 ثانية بين كل جولة تحليل لضمان تحديث البيانات من المصنع
-    """
-    print("📡 رادار الأسرار (Intelligence) قيد التحضير للعمل التلقائي...")
-    
-    # تأخير بسيط عند بداية التشغيل لأول مرة 
-    # ليعطي فرصة للمصنع (Updater) لرفع أول دفعة بيانات
-    await asyncio.sleep(40) 
-
-    while True:
-        try:
-            # استدعاء الماسح الاستخباراتي الذي قمنا بتجهيزه
+            # ثانياً: المصنع ينادي الرادار (تعال شف شغلك)
+            print("📡 نداء للرادار: البيانات جاهزة في سوبابيس، ابدأ المسح...")
             await intelligence_scanner()
             
-            print(f"⏳ دورة التحليل القادمة بعد 150 ثانية... {datetime.now().strftime('%H:%M:%S')}")
-            await asyncio.sleep(350) 
+            # ثالثاً: الرادار يخلص وينتظر دقيقة قبل الجولة الجديدة للمصنع
+            print("⏳ جولة كاملة تمت. استراحة 60 ثانية قبل التحديث القادم...")
+            await asyncio.sleep(120)
             
         except Exception as e:
-            logging.error(f"⚠️ خطأ في حلقة الرادار الاستخباراتي: {e}")
-            # في حال حدوث خطأ، انتظر 30 ثانية وحاول مجدداً
-            await asyncio.sleep(30)
+            logging.error(f"⚠️ خطأ في النظام الموحد: {e}")
+            await asyncio.sleep(30) # انتظار قصير للتعافي
+            
 # ==========================================
 # 5. نهاية الملف: نظام الإنعاش الأبدي 24/7 (النبض الذاتي) ⚡
 # ==========================================
@@ -2490,32 +2476,27 @@ async def main_startup():
     site = web.TCPSite(runner, '0.0.0.0', port)
     await site.start()
     logging.info(f"🌐 Server started on port {port}")
-
     # ب) تشغيل محركات التداول والاستخبارات في الخلفية
     # ب) تشغيل محركات التداول في الخلفية
     logging.info("⏳ جاري تشغيل محركات السوق ورادار الأسرار...")
     
-    # 1. محرك تصفية الصفقات (الـ Reaper)
+    # 1. محرك تصفية الصفقات (الـ Reaper)    
     asyncio.create_task(trade_reaper()) 
     
-    # 2. محرك تحديث الأسعار والمؤشرات (المصنع)
-    asyncio.create_task(market_updater_background_task())
-
-    # 3. محرك الاستخبارات والفرص الذهبية (المحلل) - أضفناه هنا
-    asyncio.create_task(run_intelligence_radar())
+    # 2 & 3. النظام الموحد (المصنع + الرادار) - تم الدمج لضمان التتابع
+    # هذا المحرك سيقوم بالتحديث أولاً، ثم ينادي الرادار تلقائياً
+    asyncio.create_task(unified_trading_system())
        
     # ج) تشغيل البوت (لإصدار Aiogram 2.x)
     try:
-        logging.info("🚀 جاري إقلاع محرك التليجرام... الرادار الآن تحت سيطرتك يا أثر.")
+        logging.info("🚀 جاري إقلاع محرك التليجرام... النظام الموحد الآن تحت سيطرتك يا أثر.")
         
-        # 1. تخطي الرسائل القديمة المتراكمة أثناء الإيقاف
         await dp.skip_updates()
-        
-        # 2. بدء استقبال الرسائل والطلبات
         await dp.start_polling()
         
     except Exception as e:
         logging.error(f"❌ خطأ في تشغيل البوت: {e}")
+            
     finally:
         # الإغلاق الآمن لتجنب تحذيرات (NoneType)
         logging.info("🛑 جاري إغلاق الاتصال بأمان...")
