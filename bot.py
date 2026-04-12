@@ -2304,7 +2304,7 @@ def calculate_obv(closes, volumes):
     
 # --- [ 3. دالة الجلب والتحليل ] ---
 async def update_crypto_market_data():
-    print(f"\n🚀 {datetime.now().strftime('%H:%M:%S')} | بدء جلب بيانات Binance Vision (شاملة OBV والفوليوم)...")
+    print(f"\n🚀 {datetime.now().strftime('%H:%M:%S')} | بدء جلب بيانات Binance Vision (شاملة OBV الاستخباراتي)...")
     
     async with aiohttp.ClientSession() as session:
         try:
@@ -2316,7 +2316,7 @@ async def update_crypto_market_data():
             logging.error(f"❌ فشل الاتصال بـ API: {e}")
             return
 
-        # --- [ تعديل الفلتر: السعر يبدأ من 0.003 فما فوق ] ---
+        # الفلتر الخاص بك: السعر >= 0.003
         top_coins = [
             c for c in ticker_data 
             if isinstance(c, dict) 
@@ -2324,7 +2324,7 @@ async def update_crypto_market_data():
             and float(c.get('lastPrice', 0)) >= 0.003
         ]
         
-        # ترتيب حسب أعلى سيولة (Quote Volume) واختيار أعلى 100 عملة
+        # ترتيب حسب أعلى سيولة واختيار أعلى 200 عملة
         top_coins = sorted(top_coins, key=lambda x: float(x.get('quoteVolume', 0)), reverse=True)[:200]
         
         timeframes = ['15m', '1h', '2h', '4h', '1d']
@@ -2358,10 +2358,19 @@ async def update_crypto_market_data():
                         closes = [float(k[4]) for k in results[i]]
                         volumes = [float(k[5]) for k in results[i]]
                         
-                        # --- [ الحسابات الاستخباراتية الجديدة ] ---
+                        # --- [ الحسابات الاستخباراتية المتطورة ] ---
                         upper, mid, lower = calculate_bollinger(closes)
-                        obv_val = calculate_obv(closes, volumes)  # دالة OBV
-                        curr_vol = float(volumes[-1])             # دالة Volume (آخر عمود)
+                        
+                        # 1. OBV الحالي (باستخدام دالتك)
+                        obv_val = calculate_obv(closes, volumes)
+                        
+                        # 2. OBV السابق (باستخدام دالتك مع استثناء آخر شمعة)
+                        obv_prev_val = calculate_obv(closes[:-1], volumes[:-1]) if len(closes) > 1 else 0.0
+                        
+                        # 3. حساب ميل السيولة (Slope)
+                        obv_slope_val = obv_val - obv_prev_val
+                        
+                        curr_vol = float(volumes[-1])
 
                         record.update({
                             f"ema_20_{tf}": calculate_ema(closes, 20),
@@ -2372,8 +2381,11 @@ async def update_crypto_market_data():
                             f"bb_middle_{tf}": mid, 
                             f"bb_lower_{tf}": lower,
                             f"volume_ma_{tf}": sum(volumes[-20:]) / 20,
-                            f"volume_{tf}": curr_vol,  # إضافة الحجم الحالي للسوبابيس
-                            f"obv_{tf}": obv_val       # إضافة OBV للسوبابيس
+                            f"volume_{tf}": curr_vol,
+                            f"obv_{tf}": obv_val,
+                            # --- حقن الأعمدة الجديدة لجميع الفريمات ---
+                            f"obv_prev_{tf}": obv_prev_val,
+                            f"obv_slope_{tf}": obv_slope_val
                         })
                 final_records.append(record)
             except Exception as e: 
@@ -2381,11 +2393,11 @@ async def update_crypto_market_data():
                 continue
 
         if final_records:
-            print(f"📦 جاري رفع {len(final_records)} عملة (استخبارات كاملة) إلى سوبابيس...")
+            print(f"📦 جاري رفع {len(final_records)} عملة مع بيانات 'الجندي المجهول' كاملة...")
             for i in range(0, len(final_records), 10):
                 await async_manual_upsert("crypto_market_simulation", final_records[i:i + 10])
     
-    print(f"✅ {datetime.now().strftime('%H:%M:%S')} | تم التحديث بنجاح.")
+    print(f"✅ {datetime.now().strftime('%H:%M:%S')} | تم التحديث والحقن بنجاح.")
     
 
 # --- [ 4. حلقة التشغيل التلقائي ] ---
