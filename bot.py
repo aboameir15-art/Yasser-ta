@@ -208,12 +208,12 @@ async def trade_reaper():
         
 async def intelligence_scanner():
     """
-    الماسح الاستخباراتي: يحلل البيانات الجاهزة في سوبابيس (بدون جلب بيانات خارجية)
+    الماسح الاستخباراتي المتقدم v2.0 (رادار الحيتان)
+    يدمج تحليل السعر مع تحليل الجهد (Volume) والتراكم (OBV)
     """
-    print(f"🚀 {datetime.now().strftime('%H:%M:%S')} | بدأ الرادار في تحليل أعماق قاعدة البيانات...")
+    print(f"🚀 {datetime.now().strftime('%H:%M:%S')} | بدأ الرادار في تشريح أعماق السيولة...")
     
     try:
-        # 1. جلب البيانات التي قام "المصنع" برفعها وتجهيزها (المؤشرات موجودة هنا بالفعل)
         res = supabase.table("crypto_market_simulation").select("*").execute()
         coins = res.data
         if not coins: 
@@ -225,68 +225,91 @@ async def intelligence_scanner():
             score = 0
             reasons = []
 
-            # --- [ تم حذف الاعتماد على fetch_historical_data و pandas ] ---
-            # --- [ سنعتمد على الأعمدة التي رفعها 'المصنع' في الجدول مباشرة ] ---
-
-            # السر الأول: الاختناق الانفجاري (Squeeze)
-            # نستخدم قيم البولنجر التي رفعها المصنع للفريم 15 دقيقة
+            # 🛠️ استخراج البيانات من سوبابيس
+            price = float(coin.get('current_price', 0))
+            
+            # بيانات السعر
             upper = float(coin.get('bb_upper_15m', 0))
             lower = float(coin.get('bb_lower_15m', 0))
-            middle = float(coin.get('bb_middle_15m', 1)) 
+            middle = float(coin.get('bb_middle_15m', 1))
+            rsi_15m = float(coin.get('rsi_15m', 50))
+            ema20 = float(coin.get('ema_20_15m', 0))
+            ema50 = float(coin.get('ema_50_15m', 0))
             
+            # 🚨 بيانات السيولة الاستخباراتية (الأسلحة الجديدة)
+            vol_15m = float(coin.get('volume_15m', 0))
+            vol_ma_15m = float(coin.get('volume_ma_15m', 1))
+            obv_15m = float(coin.get('obv_15m', 0))
+            obv_1h = float(coin.get('obv_1h', 0))
+
+            # ==========================================
+            # 🕵️‍♂️ [ محرك الأسرار وفك التشفير ]
+            # ==========================================
+
+            # 1. السر الأول: الاختناق السعري (20 نقطة) - الهدوء الذي يسبق العاصفة
             if middle > 0:
                 squeeze_width = (upper - lower) / middle
                 if 0 < squeeze_width < 0.03: 
-                    score += 40
-                    reasons.append("🌋 اختناق سعري جاهز للانفجار")
+                    score += 20
+                    reasons.append("🌋 اختناق سعري جاهز للانفجار (Squeeze)")
 
-            # السر الثاني: تشبع البيع الفائق (RSI < 22)
-            rsi_val = float(coin.get('rsi_15m', 50))
-            if rsi_val < 22:
-                score += 30
-                reasons.append("🎯 منطقة تشبع بيعي فائقة (RSI < 22)")
+            # 2. السر الثاني: انفجار الجهد الشرائي (35 نقطة) - أقوى مؤشر
+            # إذا كان الفوليوم الحالي أكبر من المتوسط بـ 250% (دخول حوت فوري)
+            if vol_ma_15m > 0 and vol_15m > (vol_ma_15m * 2.5):
+                score += 35
+                reasons.append(f"🐳 انفجار فوليوم ({vol_15m/vol_ma_15m:.1f}x ضعف المتوسط)")
 
-            # السر الثالث: اتجاه القوة (EMA 20 > 50)
-            ema20 = float(coin.get('ema_20_15m', 0))
-            ema50 = float(coin.get('ema_50_15m', 0))
-            if ema20 > ema50 and ema50 > 0:
+            # 3. السر الثالث: التجميع المخفي (25 نقطة) - قراءة النوايا
+            # إذا كان الـ OBV للفريم الصغير يخترق بشكل جنوني مقارنة بالفريم الأكبر
+            if obv_15m > 0 and obv_15m > (obv_1h / 4):
+                score += 25
+                reasons.append("🌊 تجميع سيولة مخفي (OBV Bullish)")
+
+            # 4. السر الرابع: تأكيد الدخول الهجومي (20 نقطة)
+            if rsi_15m < 25:
                 score += 20
-                reasons.append("📈 اتجاه صاعد (Golden Cross)")
+                reasons.append("🎯 ارتداد قنص (RSI < 25)")
+            elif ema20 > ema50 and rsi_15m < 78:
+                score += 20
+                reasons.append("⚔️ ترند هجومي (EMA 20 > 50)")
 
-            # حساب النسبة الذهبية (0.618) بناءً على هاي ولو الـ 24 ساعة المرفوعين
+            # ==========================================
+
+            # حساب النسبة الذهبية للارتداد
             high_24h = float(coin.get('high_24h', 0))
             low_24h = float(coin.get('low_24h', 0))
             fib_618 = high_24h - (0.618 * (high_24h - low_24h))
 
-            # --- [ تحديث قاعدة البيانات وإرسال الإشارة ] ---
-
+            # تحديث جدول market_intelligence
             if score > 0:
-                # تحديث جدول الاستخبارات بالنتيجة
                 supabase.table("market_intelligence").upsert({
                     "symbol": symbol,
+                    "current_price": price,
+                    "volume_24h": vol_15m, # تخزين فوليوم الشمعة الانفجارية
+                    "avg_volume": vol_ma_15m,
+                    "rsi_value": rsi_15m,
                     "pump_score": score,
-                    "is_squeezed": (score >= 40),
+                    "is_squeezed": (squeeze_width < 0.03 if middle > 0 else False),
                     "fib_golden_ratio": fib_618,
                     "trend_status": "BULLISH" if ema20 > ema50 else "BEARISH",
                     "last_updated": "now()"
                 }).execute()
 
-            # إطلاق الإنذار الذهبي إذا تجاوزت النتيجة 85
+            # 🚨 إطلاق الإنذار الذهبي للآدمن (لن يتم إطلاقه إلا إذا توافقت السيولة مع السعر)
             if score >= 85:
-                await trigger_golden_signal(symbol, score, reasons, fib_618)
+                await trigger_golden_signal(symbol, score, reasons, fib_618, price)
 
     except Exception as e:
         logging.error(f"❌ خطأ داخلي في الماسح الاستخباراتي: {e}")
 
     print("✅ تم الانتهاء من دورة المسح وتحديث الأهداف.")
 
-async def trigger_golden_signal(symbol, score, reasons, fib_618):
-    """صياغة وإرسال الإنذار الذهبي للآدمن فقط"""
-    
-    # بناء نص الرسالة الاستخباراتية
+# تحديث دالة التنبيه لتقبل السعر الحالي
+async def trigger_golden_signal(symbol, score, reasons, fib_618, price):
     text = (
         f"🚨 <b>إشعار استخباراتي: فرصة ذهبية!</b> 🚨\n\n"
         f"🪙 <b>العملة:</b> <code>#{symbol}</code>\n"
+        f"💵 <b>السعر لحظة الرصد:</b> <code>{price}</code>\n"
         f"🔥 <b>درجة الانفجار:</b> <code>{score}/100</code> 🟢\n"
         f"━━━━━━━━━━━━━━━━━━\n"
         f"🕵️‍♂️ <b>الأسرار المرصودة:</b>\n"
@@ -297,20 +320,21 @@ async def trigger_golden_signal(symbol, score, reasons, fib_618):
         
     text += (
         f"\n📐 <b>المستويات الفنية:</b>\n"
-        f"👈 النسبة الذهبية (0.618): <code>{fib_618:,.4f} $</code>\n"
+        f"👈 النسبة الذهبية (0.618): <code>{fib_618:,.4f}</code>\n"
         f"━━━━━━━━━━━━━━━━━━\n"
-        f"<i>⚠️ هذه البيانات سرية ومرسلة لك فقط يا أثر.</i>"
+        f"<i>⚠️ هذه البيانات سرية ومرسلة لك فقط.</i>"
     )
 
-    # إنشاء زر سريع لفتح إعدادات الصفقة لهذه العملة
     keyboard = types.InlineKeyboardMarkup()
-    keyboard.add(types.InlineKeyboardButton(f"⚡ قنص {symbol} الآن", callback_data=f"setup_trade_{symbol}"))
+    # ربط الزر بتوصية الـ VIP التي صنعناها مسبقاً
+    keyboard.add(types.InlineKeyboardButton(f"⚡ إصدار توصية VIP لـ {symbol}", callback_data=f"vip_signal:{ADMIN_ID}:{symbol}"))
 
     try:
-        # الإرسال للـ ADMIN_ID حصراً
         await bot.send_message(chat_id=ADMIN_ID, text=text, reply_markup=keyboard, parse_mode="HTML")
     except Exception as e:
         print(f"Error sending signal: {e}")
+        
+                        
 # ==========================================
 # 1. الدوال الحسابية الأساسية (Math Core)
 # ==========================================
