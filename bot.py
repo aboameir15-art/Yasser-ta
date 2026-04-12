@@ -280,7 +280,6 @@ async def intelligence_scanner():
             fib_618 = high_24h - (0.618 * (high_24h - low_24h))
 
             # تحديث جدول market_intelligence
-
             if score > 0:
                 supabase.table("market_intelligence").upsert({
                     "symbol": symbol,
@@ -306,11 +305,8 @@ async def intelligence_scanner():
 
 # تحديث دالة التنبيه لتقبل السعر الحالي
 async def trigger_golden_signal(symbol, score, reasons, fib_618, price):
-    """صياغة وإرسال الإنذار الذهبي للآدمن بتنسيق HTML سليم"""
-    
-    # بناء النص مع التأكد من إغلاق كل الوسوم
     text = (
-        f"🚨 <b>إشعار فوري: فرصة ذهبية!</b> 🚨\n\n"
+        f"🚨 <b>إشعار مهم: فرصة ذهبية!</b> 🚨\n\n"
         f"🪙 <b>العملة:</b> <code>#{symbol}</code>\n"
         f"💵 <b>السعر لحظة الرصد:</b> <code>{price}</code>\n"
         f"🔥 <b>درجة الانفجار:</b> <code>{score}/100</code> 🟢\n"
@@ -2413,7 +2409,7 @@ async def run_intelligence_radar():
     
     # تأخير بسيط عند بداية التشغيل لأول مرة 
     # ليعطي فرصة للمصنع (Updater) لرفع أول دفعة بيانات
-    await asyncio.sleep(20) 
+    await asyncio.sleep(40) 
 
     while True:
         try:
@@ -2426,7 +2422,7 @@ async def run_intelligence_radar():
         except Exception as e:
             logging.error(f"⚠️ خطأ في حلقة الرادار الاستخباراتي: {e}")
             # في حال حدوث خطأ، انتظر 30 ثانية وحاول مجدداً
-            await asyncio.sleep(60)
+            await asyncio.sleep(30)
 # ==========================================
 # 5. نهاية الملف: نظام الإنعاش الأبدي 24/7 (النبض الذاتي) ⚡
 # ==========================================
