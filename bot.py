@@ -93,7 +93,6 @@ async def get_intelligence_report_text():
     
     report += "\n<i>البيانات مستخرجة بناءً على 'فراغ السيولة' و 'الاختناق'.</i>"
     return report, get_admin_main_keyboard(ADMIN_ID)
-
     
 # ==========================================
 # --- [ محرك تحليل الحساب المطور ] ---
@@ -281,6 +280,7 @@ async def intelligence_scanner():
             fib_618 = high_24h - (0.618 * (high_24h - low_24h))
 
             # تحديث جدول market_intelligence
+
             if score > 0:
                 supabase.table("market_intelligence").upsert({
                     "symbol": symbol,
@@ -2329,7 +2329,7 @@ async def update_crypto_market_data():
         ]
         
         # ترتيب حسب أعلى سيولة (Quote Volume) واختيار أعلى 100 عملة
-        top_coins = sorted(top_coins, key=lambda x: float(x.get('quoteVolume', 0)), reverse=True)[:300]
+        top_coins = sorted(top_coins, key=lambda x: float(x.get('quoteVolume', 0)), reverse=True)[:200]
         
         timeframes = ['15m', '1h', '2h', '4h', '1d']
         final_records = []
@@ -2399,10 +2399,10 @@ async def market_updater_background_task():
         try:
             await update_crypto_market_data()
             print("⏳ أنتظر 120 ثانية قبل الجولة القادمة...\n")
-            await asyncio.sleep(300) 
+            await asyncio.sleep(120) 
         except Exception as e:
             logging.error(f"Market Updater Loop Error: {e}")
-            await asyncio.sleep(30) # انتظار أقصر عند حدوث خطأ للتعافي السريع
+            await asyncio.sleep(120) # انتظار أقصر عند حدوث خطأ للتعافي السريع
 
 async def run_intelligence_radar():
     """
