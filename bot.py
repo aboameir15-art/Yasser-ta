@@ -316,18 +316,18 @@ async def intelligence_scanner():
                 supabase.table("market_intelligence").upsert({
                     "symbol": symbol,
                     "current_price": price,
-                    "pump_score": score,
-                    "obv_status": "SILENT_ACCUMULATION" if abs(price_change_24h) < 1.0 else "BREAKOUT",
-                    "liquidity_score": obv_slope_15m,
+                    "pump_score": int(score), # تحويل لـ integer ليطابق جدولك
+                    "global_obv_status": "SILENT_ACCUMULATION" if abs(price_change_24h) < 1.0 else "BREAKOUT",
+                    "multi_frame_liquidity_score": obv_slope_15m, # الاسم الصحيح من جدولك
                     "is_squeezed": True if 0 < (upper - lower) / middle < 0.025 else False,
                     "fib_golden_ratio": fib_618,
                     "trend_status": "TARGET_LOCKED",
                     "last_updated": "now()"
                 }).execute()
 
-                # استدعاء دالة إرسال الإشارة إلى التليجرام
+                # استدعاء دالة إرسال الإشارة
                 await trigger_golden_signal(symbol, score, reasons, fib_618, price)
-
+                
     except Exception as e:
         logging.error(f"❌ خطأ داخلي في الرادار القناص: {e}")
 
