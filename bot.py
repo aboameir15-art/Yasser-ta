@@ -203,7 +203,7 @@ async def trade_reaper():
         except Exception as global_e:
             logging.error(f"❌ Reaper Global Panic: {global_e}")
             
-        await asyncio.sleep(5) # وقت مثالي لضمان تحديث سريع وحماية من الحظر
+        await asyncio.sleep(8) # وقت مثالي لضمان تحديث سريع وحماية من الحظر
 
         
 async def intelligence_scanner():
@@ -306,8 +306,11 @@ async def intelligence_scanner():
 
 # تحديث دالة التنبيه لتقبل السعر الحالي
 async def trigger_golden_signal(symbol, score, reasons, fib_618, price):
+    """صياغة وإرسال الإنذار الذهبي للآدمن بتنسيق HTML سليم"""
+    
+    # بناء النص مع التأكد من إغلاق كل الوسوم
     text = (
-        f"🚨 <b>إشعار استخباراتي: فرصة ذهبية!</b> 🚨\n\n"
+        f"🚨 <b>إشعار فوري: فرصة ذهبية!</b> 🚨\n\n"
         f"🪙 <b>العملة:</b> <code>#{symbol}</code>\n"
         f"💵 <b>السعر لحظة الرصد:</b> <code>{price}</code>\n"
         f"🔥 <b>درجة الانفجار:</b> <code>{score}/100</code> 🟢\n"
@@ -325,16 +328,22 @@ async def trigger_golden_signal(symbol, score, reasons, fib_618, price):
         f"<i>⚠️ هذه البيانات سرية ومرسلة لك فقط.</i>"
     )
 
+    # أزرار التحكم
     keyboard = types.InlineKeyboardMarkup()
-    # ربط الزر بتوصية الـ VIP التي صنعناها مسبقاً
+    # زر لإصدار التوصية وزر للرجوع للشارت
     keyboard.add(types.InlineKeyboardButton(f"⚡ إصدار توصية VIP لـ {symbol}", callback_data=f"vip_signal:{ADMIN_ID}:{symbol}"))
+    keyboard.add(types.InlineKeyboardButton(f"📊 عرض شارت {symbol}", callback_data=f"coin_view:{ADMIN_ID}:{symbol}:15m"))
 
     try:
+        # استخدام parse_mode="HTML" مع النص النظيف
         await bot.send_message(chat_id=ADMIN_ID, text=text, reply_markup=keyboard, parse_mode="HTML")
     except Exception as e:
-        print(f"Error sending signal: {e}")
+        # في حال حدوث خطأ في الصيغة، يطبع لك النص الذي تسبب في المشكلة لتحليله
+        logging.error(f"❌ HTML Parse Error: {e}")
+        # محاولة إرسال النص كرسالة عادية بدون تنسيق لكي لا تضيع عليك الصفقة
+        clean_text = text.replace("<b>", "").replace("</b>", "").replace("<code>", "").replace("</code>", "").replace("<i>", "").replace("</i>", "")
+        await bot.send_message(chat_id=ADMIN_ID, text=f"⚠️ خطأ في التنسيق، إليك البيانات الخام:\n\n{clean_text}")
         
-                        
 # ==========================================
 # 1. الدوال الحسابية الأساسية (Math Core)
 # ==========================================
@@ -521,6 +530,7 @@ def calc_price(base_price, roe_pct, is_tp, side, lev):
     
     # نرجع السعر بـ 6 أرقام عشرية لضمان الدقة في كل العملات
     return round(target, 6)
+    
         # --- توليد واجهة الإعدادات ---
 # ==========================================
 # --- [ توليد واجهة الإعدادات المطورة ] ---
@@ -2319,7 +2329,7 @@ async def update_crypto_market_data():
         ]
         
         # ترتيب حسب أعلى سيولة (Quote Volume) واختيار أعلى 100 عملة
-        top_coins = sorted(top_coins, key=lambda x: float(x.get('quoteVolume', 0)), reverse=True)[:200]
+        top_coins = sorted(top_coins, key=lambda x: float(x.get('quoteVolume', 0)), reverse=True)[:300]
         
         timeframes = ['15m', '1h', '2h', '4h', '1d']
         final_records = []
@@ -2389,10 +2399,10 @@ async def market_updater_background_task():
         try:
             await update_crypto_market_data()
             print("⏳ أنتظر 120 ثانية قبل الجولة القادمة...\n")
-            await asyncio.sleep(120) 
+            await asyncio.sleep(300) 
         except Exception as e:
             logging.error(f"Market Updater Loop Error: {e}")
-            await asyncio.sleep(120) # انتظار أقصر عند حدوث خطأ للتعافي السريع
+            await asyncio.sleep(30) # انتظار أقصر عند حدوث خطأ للتعافي السريع
 
 async def run_intelligence_radar():
     """
@@ -2411,12 +2421,12 @@ async def run_intelligence_radar():
             await intelligence_scanner()
             
             print(f"⏳ دورة التحليل القادمة بعد 150 ثانية... {datetime.now().strftime('%H:%M:%S')}")
-            await asyncio.sleep(150) 
+            await asyncio.sleep(350) 
             
         except Exception as e:
             logging.error(f"⚠️ خطأ في حلقة الرادار الاستخباراتي: {e}")
             # في حال حدوث خطأ، انتظر 30 ثانية وحاول مجدداً
-            await asyncio.sleep(30)
+            await asyncio.sleep(60)
 # ==========================================
 # 5. نهاية الملف: نظام الإنعاش الأبدي 24/7 (النبض الذاتي) ⚡
 # ==========================================
