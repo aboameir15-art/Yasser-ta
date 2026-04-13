@@ -323,7 +323,7 @@ async def intelligence_scanner():
             fib_618 = high_24h - (0.618 * (high_24h - low_24h))
 
             # 🚀 إرسال الإنذار الذهبي مبكراً من مستوى 70
-            if score >= 100:
+            if score >= 140:
                 supabase.table("market_intelligence").upsert({
                     "symbol": symbol,
                     "current_price": price,
