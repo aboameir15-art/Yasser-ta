@@ -233,6 +233,7 @@ async def intelligence_scanner():
             lower = float(coin.get('bb_lower_15m', 0))
             middle = float(coin.get('bb_middle_15m', 1))
             
+            rsi_15m = float(coin.get('rsi_15m', 50))
             # المتوسطات المتحركة
             ema20 = float(coin.get('ema_20_15m', 0))
             ema50 = float(coin.get('ema_50_15m', 0))
@@ -280,6 +281,13 @@ async def intelligence_scanner():
                 score += 20
                 reasons.append(f"📊 فوليوم متزايد ({vol_15m/vol_ma_15m:.1f}x)")
 
+            # 6. السر الرابع: تأكيد الدخول الهجومي (20 نقطة)
+            if rsi_15m < 25:
+                score += 20
+                reasons.append("🎯 ارتداد قنص (RSI < 25)")
+            elif ema20 > ema50 and rsi_15m < 78:
+                score += 20
+                reasons.append("⚔️ ترند هجومي (EMA 20 > 50)")
             # ==========================================
             # ⚔️ [ شفرة الجندي المجهول (OBV): لعنة السوق ] ⚔️
             # ==========================================
@@ -316,6 +324,9 @@ async def intelligence_scanner():
                 supabase.table("market_intelligence").upsert({
                     "symbol": symbol,
                     "current_price": price,
+                    "avg_volume": vol_ma_15m,
+                    "volume_24h": vol_15m,
+                    "rsi_value": rsi_15m,
                     "pump_score": int(score), # تحويل لـ integer ليطابق جدولك
                     "global_obv_status": "SILENT_ACCUMULATION" if abs(price_change_24h) < 1.0 else "BREAKOUT",
                     "multi_frame_liquidity_score": obv_slope_15m, # الاسم الصحيح من جدولك
