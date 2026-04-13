@@ -289,7 +289,7 @@ async def intelligence_scanner():
             
             # الحالة الثانية: الترند الهجومي المستمر
             elif ema20 > ema50 and rsi_15m < 78:
-                score += 20
+                score += 10
                 reasons.append("⚔️ ترند هجومي (EMA 20 > 50)")
             # ==========================================
             # ⚔️ [ شفرة الجندي المجهول (OBV): لعنة السوق ] ⚔️
@@ -323,7 +323,7 @@ async def intelligence_scanner():
             fib_618 = high_24h - (0.618 * (high_24h - low_24h))
 
             # 🚀 إرسال الإنذار الذهبي مبكراً من مستوى 70
-            if score >= 140:
+            if score >= 150:
                 supabase.table("market_intelligence").upsert({
                     "symbol": symbol,
                     "current_price": price,
