@@ -206,12 +206,13 @@ async def trade_reaper():
         await asyncio.sleep(8) # وقت مثالي لضمان تحديث سريع وحماية من الحظر
 
         
+
 async def intelligence_scanner():
     """
-    الرادار الاستخباراتي v4.0 (اللعنة الاستخباراتية)
-    يقرأ الهيكل، يكشف التجميع الصامت، ويطلق الإنذار المبكر من مستوى 70.
+    الرادار الاستخباراتي v7.0 (إعصار BBW الاستخباراتي)
+    تم تصميمه ليكون "لعنة" على التذبذب الوهمي وصائداً مؤكداً للانفجارات السعرية.
     """
-    print(f"🚀 {datetime.now().strftime('%H:%M:%S')} | الرادار يبحث عن الأسرار وتدفقات الحيتان (OBV)...")
+    print(f"🚀 {datetime.now().strftime('%H:%M:%S')} | الرادار الخارق v7.0 يمسح السوق بأشعة البولنجر والسيولة...")
     
     try:
         res = supabase.table("crypto_market_simulation").select("*").execute()
@@ -224,134 +225,134 @@ async def intelligence_scanner():
             score = 0
             reasons = []
 
-            # 🛠️ استخراج البيانات الحيوية من سوبابيس
+            # 🛠️ البيانات الحيوية
             price = float(coin.get('current_price', 0))
-            price_change_24h = float(coin.get('change_24h', 0))
             
-            # خطوط البولنجر (فريم 15 دقيقة)
+            # خطوط البولنجر (الأصفر والأبيض)
             upper = float(coin.get('bb_upper_15m', 0))
             lower = float(coin.get('bb_lower_15m', 0))
             middle = float(coin.get('bb_middle_15m', 1))
             
+            # RSI (مبني على إعداداتك: القاع تحت 25 يقترب من منطقة الـ 22 الذهبية)
             rsi_15m = float(coin.get('rsi_15m', 50))
-            # المتوسطات المتحركة
+            
+            # المتوسطات المتحركة (الأحمر، الأخضر، الأزرق)
             ema20 = float(coin.get('ema_20_15m', 0))
             ema50 = float(coin.get('ema_50_15m', 0))
             ema100 = float(coin.get('ema_100_15m', 0))
             
-            # السيولة التقليدية
             vol_15m = float(coin.get('volume_15m', 0))
             vol_ma_15m = float(coin.get('volume_ma_15m', 1))
 
-            # 🕵️‍♂️ [ استدعاء بيانات الجندي المجهول (OBV) ]
-            obv_current = float(coin.get('obv_15m', 0))
-            obv_prev = float(coin.get('obv_prev_15m', 0))
             obv_slope_15m = float(coin.get('obv_slope_15m', 0))
-            obv_slope_1h = float(coin.get('obv_slope_1h', 0))
-            obv_slope_4h = float(coin.get('obv_slope_4h', 0))
-
-            # ==========================================
-            # 📐 [ المحرك الفني: الهيكل السعري المطور ]
-            # ==========================================
-
-            # 1. السر الأول: اختناق البولنجر [20 نقطة]
-            if middle > 0:
-                squeeze_width = (upper - lower) / middle
-                if 0 < squeeze_width < 0.025:
-                    score += 20
-                    reasons.append("🌋 اختناق سعري (ضغط يسبق الانفجار)")
-
-            # 2. السر الثاني: الترتيب الهجومي للخطوط [25 نقطة]
-            if ema20 > ema50 > ema100 and ema100 > 0:
-                score += 25
-                reasons.append("🛡️ هيكل ترند صاعد (أحمر > أخضر > أزرق)")
-
-            # 3. السر الثالث: شرارة الانفجار [20 نقطة]
-            if ema20 > middle > ema100:
-                score += 20
-                reasons.append("⚡ شرارة الانفجار (الأحمر فوق الأبيض)")
-
-            # 4. السر الرابع: الالتحام بالبولنجر العلوي [25 نقطة]
-            if price >= (upper * 0.998):
-                score += 25
-                reasons.append("🟡 السعر يلتحم بالخط الأصفر العلوي")
-
-            # 5. السر الخامس: فوليوم الشموع [20 نقطة]
-            if vol_ma_15m > 0 and vol_15m > (vol_ma_15m * 1.5):
-                score += 20
-                reasons.append(f"📊 فوليوم متزايد ({vol_15m/vol_ma_15m:.1f}x)")
-
-            # 6. السر السادس: تأكيد الدخول الهجومي المدعوم بالسيولة
-            # الحالة الأولى: قنص الارتداد (شرط RSI منخفض + بداية دخول سيولة)
-            if rsi_15m < 25 and obv_slope_15m > 0:
-                score += 40  # رفعنا النقاط لـ 40 لأنها فرصة ذهبية مدعومة بالسيولة
-                reasons.append("🎯 قنص قاع مؤكد: ارتداد RSI مدعوم بدخول حيتان (OBV)")
             
-            # الحالة الثانية: الترند الهجومي المستمر
-            elif ema20 > ema50 and rsi_15m < 78:
-                score += 10
-                reasons.append("⚔️ ترند هجومي (EMA 20 > 50)")
+            # --- [ 👁️ استخبارات عرض القناة BBW (السر العظيم) ] ---
+            bbw_15m = float(coin.get('bbw_15m', 0))
+            bbw_prev_15m = float(coin.get('bbw_prev_15m', 0))
+            
+            # نسبة التوسع: إذا كانت > 1.10 يعني أن "فم التمساح" فتح بقوة 10%
+            expansion_ratio_15m = (bbw_15m / bbw_prev_15m) if bbw_prev_15m > 0 else 1.0
+
+            bbw_5m = float(coin.get('bbw_5m', 0))
+            bbw_prev_5m = float(coin.get('bbw_prev_5m', 0))
+            expansion_ratio_5m = (bbw_5m / bbw_prev_5m) if bbw_prev_5m > 0 else 1.0
+
             # ==========================================
-            # ⚔️ [ شفرة الجندي المجهول (OBV): لعنة السوق ] ⚔️
+            # 🔥 [ المحرك الاستخباراتي v7.0: القنابل الموقوتة ]
             # ==========================================
 
-            # 1. رصد التجميع الصامت (السعر مستقر والسيولة ترتفع)
-            if obv_slope_15m > 0 and abs(price_change_24h) < 1.0:
+            # 💣 النموذج الأول: "زحف الإعصار" (Band Walk + Expansion) [130 نقطة]
+            # الشروط: سعر فوق الأحمر + يلامس الأصفر العلوي + ترتيب هجومي + القناة تنفجر
+            is_crawling_up = (
+                (price >= ema20) and 
+                (price >= upper * 0.995) and
+                (ema20 > middle) and
+                (ema20 > ema50 > ema100) and
+                (expansion_ratio_15m > 1.10) # 👈 الفلتر القاتل: القناة تنفجر الآن
+            )
+            
+            if is_crawling_up:
+                score += 130
+                reasons.append(f"🚀 زحف الإعصار: السعر يركب الخط العلوي بقوة هجومية مع توسع ({expansion_ratio_15m:.1%})")
+
+            # 💣 النموذج الثاني: "مصيدة الحيتان / قنص القاع" [120 نقطة]
+            # الشروط: ملامسة السفلي + RSI متشبع بيعياً + الحيتان تشتري سراً + بداية فتح القناة للارتداد
+            is_reverse_pump = (
+                (price <= lower * 1.005) and
+                (rsi_15m < 25) and # قريبة جداً من خط الـ 22 الخاص بك
+                (obv_slope_15m > 0) and
+                (expansion_ratio_15m > 1.05) # 👈 القناة تبدأ بالفتح للارتداد
+            )
+            
+            if is_reverse_pump:
+                score += 120
+                reasons.append(f"🎯 قنص القاع: زحف سفلي مع دخول سيولة صامتة (RSI: {rsi_15m:.1f}) وبداية توسع")
+
+            # ==========================================
+            # ⚡ [ معززات الزخم الاستخباراتية (Boosters) ]
+            # ==========================================
+            
+            # 1. شرارة الـ 5 دقائق (رصد مبكر جداً)
+            if expansion_ratio_5m > 1.20:
                 score += 30
-                reasons.append("🕵️‍♂️ تجميع صامت (OBV صاعد رغم ثبات السعر)")
+                reasons.append(f"🔥 شرارة الانفجار: توسع عنيف جداً في فريم 5m ({expansion_ratio_5m:.1%})")
 
-            # 2. رصد الانفجار المدعوم (اختراق السيولة)
-            if obv_slope_15m > 0 and obv_current > obv_prev:
-                score += 25
-                reasons.append("🔥 اندفاع سيولة ذكي (OBV Accumulation)")
-                
-                # تأكيد استراتيجي من الفريمات الكبيرة لقوة الضربة
-                if obv_slope_1h > 0 or obv_slope_4h > 0:
-                    score += 15
-                    reasons.append("🏛️ تأكيد استراتيجي: الحيتان تدعم من الفريمات الكبيرة")
+            # 2. كسر الاختناق التاريخي (Squeeze Release)
+            is_squeezed_now = (bbw_15m < 0.025)
+            if is_squeezed_now and expansion_ratio_15m > 1.05:
+                score += 40
+                reasons.append("🌋 كسر الضغط: خروج عنيف من مرحلة اختناق شديدة")
 
-            # 3. فلتر الحماية (الدايفرجنس السلبي: كشف الفخاخ)
-            if obv_slope_15m < 0 and price_change_24h > 2.0:
-                score -= 60 
-                reasons.append("⚠️ فخ سعري: السعر يصعد والسيولة تخرج (تصريف!)")
+            # 3. سيولة جنونية
+            if vol_ma_15m > 0 and vol_15m > (vol_ma_15m * 2):
+                score += 30
+                reasons.append("📊 فوليوم مضاعف: السيولة الحالية تتجاوز 200% من المتوسط")
+
+            # ==========================================
+            # 🛡️ [ فلاتر الحماية الصارمة (لعنة على التلاعب) ]
+            # ==========================================
+            
+            # صعود بدون سيولة، أو صعود والقناة تضيق = فخ حيتان (صعود كاذب لتصريف الكميات)
+            if price > upper and (obv_slope_15m < 0 or expansion_ratio_15m < 0.95):
+                score -= 100 # عقاب شديد يطرد العملة من الرادار فوراً
+                reasons.append("⚠️ فخ الحيتان: صعود كاذب للتصريف (خروج سيولة أو القناة تضيق)")
 
             # ==========================================
 
-            # حساب النسبة الذهبية (فيبوناتشي)
             high_24h = float(coin.get('high_24h', 0))
             low_24h = float(coin.get('low_24h', 0))
             fib_618 = high_24h - (0.618 * (high_24h - low_24h))
 
-            # 🚀 إرسال الإنذار الذهبي مبكراً من مستوى 70
-            if score >= 150:
+            # 🚀 إرسال الإنذار الذهبي للعملات التي اجتازت الاختبار
+            # رفعنا العتبة إلى 120 لضمان أن العملة حققت شرطاً رئيسياً (زحف أو قاع) مع تأكيد واحد على الأقل
+            if score >= 120: 
                 supabase.table("market_intelligence").upsert({
                     "symbol": symbol,
                     "current_price": price,
                     "avg_volume": vol_ma_15m,
                     "volume_24h": vol_15m,
                     "rsi_value": rsi_15m,
-                    "pump_score": int(score), # تحويل لـ integer ليطابق جدولك
-                    "global_obv_status": "SILENT_ACCUMULATION" if abs(price_change_24h) < 1.0 else "BREAKOUT",
-                    "multi_frame_liquidity_score": obv_slope_15m, # الاسم الصحيح من جدولك
-                    "is_squeezed": True if 0 < (upper - lower) / middle < 0.025 else False,
+                    "pump_score": int(score), 
+                    "global_obv_status": "BAND_WALK" if is_crawling_up else ("BOTTOM_REVERSAL" if is_reverse_pump else "BUILDING_MOMENTUM"),
+                    "multi_frame_liquidity_score": obv_slope_15m,
+                    "is_squeezed": is_squeezed_now,
                     "fib_golden_ratio": fib_618,
-                    "trend_status": "TARGET_LOCKED",
+                    "trend_status": "EXPLODING",
                     "last_updated": "now()"
                 }).execute()
 
-                # استدعاء دالة إرسال الإشارة
                 await trigger_golden_signal(symbol, score, reasons, fib_618, price)
                 
     except Exception as e:
         logging.error(f"❌ خطأ داخلي في الرادار القناص: {e}")
 
-    print("✅ تم الانتهاء من المسح الاستخباراتي.")
-
+    print("✅ تم الانتهاء من المسح الاستخباراتي (v7.0). لا مجال للهروب.")
+    
 # تحديث دالة التنبيه لتقبل السعر الحالي
 async def trigger_golden_signal(symbol, score, reasons, fib_618, price):
     text = (
         f"🚨 <b>إشعار مهم: فرصة ذهبية!</b> 🚨\n\n"
-        f"🪙 <b>العملة:</b> <code>#{symbol}</code>\n"
+        f"🪙 <b>العملة:</b> <code>{symbol}</code>\n"
         f"💵 <b>السعر لحظة الرصد:</b> <code>{price}</code>\n"
         f"🔥 <b>درجة الانفجار:</b> <code>{score}/100</code> 🟢\n"
         f"━━━━━━━━━━━━━━━━━━\n"
@@ -1300,14 +1301,24 @@ async def process_coin_view(callback_query: types.CallbackQuery):
             
         coin = res.data[0]
         price = float(coin.get('current_price', 0))
-        high = float(coin.get('high_24h', 0)) # تم إرجاع أعلى سعر
-        low = float(coin.get('low_24h', 0))   # تم إرجاع أدنى سعر
+        high = float(coin.get('high_24h', 0))
+        low = float(coin.get('low_24h', 0))
         change = float(coin.get('change_24h', 0))
         
-        # بيانات السيولة للفريم المحدد
+        # --- [ استدعاء البيانات الاستخباراتية المحدثة ] ---
+        # بيانات السيولة (OBV)
         vol_current = float(coin.get(f'volume_{tf}', 0))
-        obv_current = float(coin.get(f'obv_{tf}', 0))
+        obv_now = float(coin.get(f'obv_{tf}', 0))
+        obv_prev = float(coin.get(f'obv_prev_{tf}', 0))
+        obv_slope = float(coin.get(f'obv_slope_{tf}', 0))
         
+        # بيانات عرض القناة (BBW) - "فم التمساح"
+        bbw_now = float(coin.get(f'bbw_{tf}', 0))
+        bbw_prev = float(coin.get(f'bbw_prev_{tf}', 0))
+        
+        # حساب نسبة الانفجار (Expansion Ratio)
+        expansion = (bbw_now / bbw_prev * 100) if bbw_prev > 0 else 100
+
         # مؤشرات الشارت
         ema20 = float(coin.get(f'ema_20_{tf}', price))
         ema50 = float(coin.get(f'ema_50_{tf}', price))
@@ -1318,7 +1329,10 @@ async def process_coin_view(callback_query: types.CallbackQuery):
         rsi = float(coin.get(f'rsi_{tf}', 50))
 
         def f_num(val): return f"{val:,.4f}" if val < 1 else f"{val:,.2f}"
-        vol_color = "🟩" if change >= 0 else "🟥"
+        
+        # أيقونات ذكية للحالة
+        expansion_icon = "🔥" if expansion > 110 else "💤"
+        obv_icon = "🌊" if obv_slope > 0 else "📉"
 
         # ترتيب الشارت الديناميكي
         chart_elements = [
@@ -1332,23 +1346,29 @@ async def process_coin_view(callback_query: types.CallbackQuery):
         ]
         chart_elements.sort(key=lambda x: x["val"], reverse=True)
 
-        # 📝 [ بناء الرسالة النهائية الشاملة ]
+        # 📝 [ بناء الرسالة النهائية الاستخباراتية ]
         text = f"<b>{symbol.replace('USDT', '')} / USDT</b> | ⏱ {tf}\n"
-        text += f"السعر الحالي: <code>{f_num(price)}</code> ({change:+.2f}%)\n"
-        text += f"أعلى سعر: <code>{f_num(high)}</code>\n"
-        text += f"أدنى سعر: <code>{f_num(low)}</code>\n"
-        text += "----------------------\n"
-        # إضافة بيانات الفوليوم والـ OBV هنا
-        text += f"📊: أعمدة السيولة {vol_color} {{ <code>{vol_current:,.0f}</code> }}\n"
-        text += f"📈: مؤشر الـ OBV {{ <code>{obv_current:,.0f}</code> }}\n"
-        text += "----------------------\n"
+        text += f"💰 السعر: <code>{f_num(price)}</code> ({change:+.2f}%)\n"
+        text += f"🔝 أعلى: <code>{f_num(high)}</code> | 🔙 أدنى: <code>{f_num(low)}</code>\n"
         
+        text += "----------------------\n"
+        text += f"💎 <b>قسم استخبارات السيولة (OBV):</b>\n"
+        text += f"• الحالي: <code>{obv_now:,.0f}</code>\n"
+        text += f"• السابق: <code>{obv_prev:,.0f}</code>\n"
+        text += f"{obv_icon} الميل (Slope): <code>{obv_slope:,.0f}</code>\n"
+        
+        text += "----------------------\n"
+        text += f"🐊 <b>قوة الانفجار (BBW):</b>\n"
+        text += f"• عرض القناة: <code>{bbw_now:.4f}</code>\n"
+        text += f"{expansion_icon} نسبة التوسع: <code>{expansion:.1f}%</code>\n"
+        
+        text += "----------------------\n"
         for el in chart_elements:
             text += f"{el['icon']}: {el['name']} {{ <code>{f_num(el['val'])}</code> }}\n"
             
         text += "----------------------\n"
-        text += f"📈: مؤشر RSI 14 {{ <b>{rsi:.1f}</b> }}\n"
-        text += "®: خط علوي 78 | ®: خط سفلي 22\n"
+        text += f"📈 RSI 14: <b>{rsi:.1f}</b> | 🧭 OBV/V: <code>{vol_current:,.0f}</code>\n"
+        text += "⚠️ <i>إعداداتك الذهبية: RSI (22 / 78)</i>\n"
         text += "===================="
 
         await callback_query.message.edit_text(
@@ -1360,9 +1380,9 @@ async def process_coin_view(callback_query: types.CallbackQuery):
     except Exception as e:
         print(f"Error: {e}")
         await callback_query.answer("❌ حدث خطأ في معالجة البيانات.")
-               
+        
 # --- [ 3. هاندلر توصية VIP (قالب العنود / الدخول الهجومي) ] ---
-# --- [ 3. هاندلر توصية VIP (قالب الدخول الهجومي الذكي) ] ---
+# --- [ 3. هاندلر توصية VIP (قالب الدخول الهجومي الذكي v7.0) ] ---
 @dp.callback_query_handler(Text(startswith='vip_signal:'), state="*")
 async def process_vip_signal(callback_query: types.CallbackQuery):
     try:
@@ -1371,62 +1391,81 @@ async def process_vip_signal(callback_query: types.CallbackQuery):
         symbol = data_parts[2]
 
         if callback_query.from_user.id != owner_id:
-            return await callback_query.answer("⚠️ لا تملك صلاحية!", show_alert=True)
+            return await callback_query.answer("⚠️ لا تملك صلاحية الوصول لغرفة العمليات!", show_alert=True)
 
         res = supabase.table("crypto_market_simulation").select("*").eq("symbol", symbol).execute()
         if not res.data: return
         
         c = res.data[0]
         price = float(c['current_price'])
+        high_24 = float(c.get('high_24h', price * 1.05))
+        low_24 = float(c.get('low_24h', price * 0.95))
         
-        # 🕵️‍♂️ [ استدعاء الأسلحة الاستخباراتية الثقيلة من سوبابيس ]
-        # المتوسطات الحيوية (الدخول الهجومي يعتمد عليها)
+        # 🕵️‍♂️ [ الأسلحة الاستخباراتية ]
         ema20_15m = float(c.get('ema_20_15m', price))
         ema50_15m = float(c.get('ema_50_15m', price))
-        
-        # حدود الانفجار (البولنجر باندز)
         bb_upper = float(c.get('bb_upper_15m', price * 1.02))
         bb_lower = float(c.get('bb_lower_15m', price * 0.98))
-        
-        # الفلاتر الزمنية والسيولة
         rsi_15m = float(c.get('rsi_15m', 50))
         obv_slope_15m = float(c.get('obv_slope_15m', 0))
-        obv_slope_4h = float(c.get('obv_slope_4h', 0))
-
-        # 🧠 [ منطق الدخول الهجومي (Aggressive Entry) ]
-        # نعتمد الشراء إذا السيولة تتدفق (+) والـ RSI لم يصل للتشبع المفرط (أقل من 78) والسعر محافظ على خطوطه
-        is_bullish = obv_slope_15m > 0 and rsi_15m < 78 and price >= ema50_15m * 0.99
         
-        # فحص الفخ (Divergence): السعر يصعد ولكن الحيتان تصرف (OBV سالب)
+        bbw_now = float(c.get('bbw_15m', 0.05))
+        bbw_prev = float(c.get('bbw_prev_15m', 0.05))
+        expansion_ratio = (bbw_now / bbw_prev) if bbw_prev > 0 else 1.0
+
+        vol_now = float(c.get('volume_15m', 1))
+        vol_ma = float(c.get('volume_ma_15m', 1))
+        
+        # 📐 [ فيزياء السوق: حساب المسافة الذهبية (Fibonacci Projections) ]
+        price_range = high_24 - low_24
+        
+        # ⏱️ [ استخبارات الزمن والمدة ]
+        # متى تبدأ الحركة؟
+        if expansion_ratio > 1.10:
+            start_time = "فوري (بدأ الانفجار الآن 🚀)"
+        elif bbw_now < 0.025:
+            start_time = "خلال 1 - 3 ساعات (اختناق نهائي ⏳)"
+        else:
+            start_time = "تجميع لحظي (السيولة تتشكل 🌊)"
+
+        # كم ستستمر الحركة؟ (تعتمد على الفوليوم)
+        if vol_now > (vol_ma * 2):
+            duration_est = "موجة عنيفة وسريعة (1 - 2 ساعات)"
+        else:
+            duration_est = "موجة زحف مستقرة (4 - 8 ساعات)"
+
+        # 🧠 [ منطق الدخول الهجومي ]
+        # الشراء: سيولة إيجابية + RSI تحت 78 (إعداداتك) + السعر يحترم EMA50
+        is_bullish = obv_slope_15m > 0 and rsi_15m < 78 and price >= ema50_15m * 0.99
         is_fakeout = obv_slope_15m < 0 and rsi_15m > 22 and price < ema50_15m
 
         if is_bullish or (not is_fakeout and rsi_15m > 50):
-            # 🟢 صفقة شراء (LONG) - استراتيجية قنص الارتدادات وانفجار السيولة
+            # 🟢 صفقة شراء (LONG)
             direction_text = "شراء (LONG)"
-            
-            # الدخول من نقطة السعر الحالية وحتى EMA 20 (دخول هجومي)
-            entry_1 = price
-            entry_2 = ema20_15m
-            if entry_1 < entry_2: entry_1, entry_2 = entry_2, entry_1 # ترتيب الأرقام
-            
-            # التعديل عند الدعم القوي جداً (EMA 50)
-            dca = ema50_15m
-            # وقف خسارة ضيق جداً (Tight SL) لضمان نسبة ربح لمخاطرة عالية
-            sl = dca * 0.985 
-            
-            # الأهداف تعتمد على اختراق خط البولنجر العلوي
-            tp1 = bb_upper if bb_upper > price else price * 1.015
-            tp2 = tp1 * 1.025
-            tp3 = tp1 * 1.055
-            
             emoji_trend = "🚀"
             emoji_target = "👉"
             action_text = "اضغط أدناه وافتح صفقة شراء (Long) 📈"
-            liquidity_note = "صاعد بقوة 🐳" if obv_slope_4h > 0 else "تجميع لحظي ✅"
+            
+            # الدخول الهجومي: بين السعر الحالي وأول دعم (EMA 20)
+            entry_1 = price
+            entry_2 = ema20_15m
+            if entry_1 < entry_2: entry_1, entry_2 = entry_2, entry_1
+            
+            # خط الدفاع (DCA) وحائط الصد (SL)
+            dca = ema50_15m
+            sl = dca * 0.985 # وقف خسارة قاسي لضمان نسبة عائد عالية
+            
+            # الأهداف الفلكية (مدمجة مع امتداد فيبوناتشي 1.272 و 1.618)
+            tp1 = max(bb_upper, price + (price_range * 0.236))
+            tp2 = price + (price_range * 0.382)
+            tp3 = price + (price_range * 0.618)
             
         else:
-            # 🔴 صفقة بيع (SHORT) - استراتيجية كسر الزخم
+            # 🔴 صفقة بيع (SHORT)
             direction_text = "بيع (SHORT)"
+            emoji_trend = "📉"
+            emoji_target = "👉"
+            action_text = "اضغط أدناه وافتح صفقة بيع (Short) 📉"
             
             # دخول هجومي على المقاومة
             entry_1 = price
@@ -1434,44 +1473,46 @@ async def process_vip_signal(callback_query: types.CallbackQuery):
             if entry_1 > entry_2: entry_1, entry_2 = entry_2, entry_1 
             
             dca = ema50_15m
-            sl = dca * 1.015 # وقف خسارة ضيق
+            sl = dca * 1.015 
             
-            tp1 = bb_lower if bb_lower < price else price * 0.985
-            tp2 = tp1 * 0.975
-            tp3 = tp1 * 0.945
-            
-            emoji_trend = "📉"
-            emoji_target = "👈"
-            action_text = "اضغط أدناه وافتح صفقة بيع (Short) 📉"
-            liquidity_note = "تخارج حيتان ⚠️" if obv_slope_4h < 0 else "تصريف لحظي 🔻"
+            # أهداف الهبوط السحيق
+            tp1 = min(bb_lower, price - (price_range * 0.236))
+            tp2 = price - (price_range * 0.382)
+            tp3 = price - (price_range * 0.618)
 
-        # تنسيق الأرقام لتبدو كمنصات التداول
         def f_num(val): return f"{val:.5f}".rstrip('0').rstrip('.') if val < 1 else f"{val:.4f}"
 
-        # 📝 القالب الذهبي (بناءً على طلبك والمسجل في البيانات)
+        # 📝 [ قالب الإرسال الاستخباراتي ]
         signal_text = f"🔥 فرصة انفجار سعري: #{symbol} {emoji_trend}\n\n"
-        signal_text += f"{direction_text}: #{symbol} {emoji_trend}\n"
-        signal_text += f"نطاق الدخول: <code>{f_num(entry_2)}</code> - <code>{f_num(entry_1)}</code>\n"
-        signal_text += f"تعديل المتوسط (DCA): <code>{f_num(dca)}</code>\n"
-        signal_text += f"وقف الخسارة (SL): <code>{f_num(sl)}</code>\n\n"
-        signal_text += f"الأهداف:\n"
-        signal_text += f"{emoji_target} الهدف الأول: <code>{f_num(tp1)}</code>\n"
-        signal_text += f"{emoji_target} الهدف الثاني: <code>{f_num(tp2)}</code>\n"
-        signal_text += f"{emoji_target} الهدف الثالث: <code>{f_num(tp3)}</code>\n\n"
+        signal_text += f"الوضع الفني حالياً:\n"
+        signal_text += f"العملة تتفاعل بقوة، وتم رصد سيولة بحجم {vol_now:,.0f} تدعم الاتجاه.\n\n"
         
-        # قسم التحليل السري
-        signal_text += f"💡 <b>التحليل الاستخباراتي:</b>\n"
-        signal_text += f"• مستوى RSI الحالي: <b>{rsi_15m:.0f}</b>\n"
-        signal_text += f"• بصمة السيولة (OBV): <b>{liquidity_note}</b>\n\n"
+        signal_text += f"📐 خطة الدخول:\n"
+        signal_text += f"{direction_text}: #{symbol}\n"
+        signal_text += f"🎯 منطقة الدخول الذهبية: <code>{f_num(entry_2)}</code> - <code>{f_num(entry_1)}</code>\n"
+        signal_text += f"🛡️ تأمين الصفقة (DCA): <code>{f_num(dca)}</code>\n"
+        signal_text += f"🚫 وقف الخسارة (SL): <code>{f_num(sl)}</code>\n\n"
         
-        signal_text += f"{action_text}\n\n"
+        signal_text += f"💰 محطات جني الأرباح (الأهداف):\n"
+        signal_text += f"{emoji_target} الهدف الأول: <code>{f_num(tp1)}</code> ⚡\n"
+        signal_text += f"{emoji_target} الهدف الثاني: <code>{f_num(tp2)}</code> 🚀\n"
+        signal_text += f"{emoji_target} الهدف الثالث: <code>{f_num(tp3)}</code> 🚀🚀\n\n"
         
+        # --- قسم الاستخبارات الزمنية ---
+        signal_text += f"⏱️ <b>توقيت الزمن والزخم:</b>\n"
+        signal_text += f"• توقيت الانفجار: <b>{start_time}</b>\n"
+        signal_text += f"• المدة المتوقعة: <b>{duration_est}</b>\n"
+        signal_text += f"• معدل فتح القناة: <b>{(expansion_ratio*100):.1f}%</b>\n"
+        signal_text += f"• إشارة RSI: <b>{rsi_15m:.0f}</b>\n\n"
+        
+        signal_text += f"{action_text}\n"
+
         back_kb = InlineKeyboardMarkup().add(
             InlineKeyboardButton("🔙 رجوع للشارت", callback_data=f"coin_view:{owner_id}:{symbol}:15m")
         )
 
         await callback_query.message.edit_text(signal_text, reply_markup=back_kb, parse_mode="HTML")
-        await callback_query.answer("💎 تم توليد إشارة الهجوم الاستخباراتية!")
+        await callback_query.answer("💎 تم توليد إحداثيات الإعصار بدقة متناهية!")
 
     except Exception as e:
         print(f"VIP Error: {e}")
@@ -2365,52 +2406,110 @@ def calculate_obv(closes, volumes):
         # إذا تساوى الإغلاق يبقى الـ OBV كما هو دون تغيير
             
     return obv
-    
+
+def calculate_bbw(upper, lower, middle):
+    """
+    تحسب عرض نطاق البولنجر (BBW).
+    المعادلة: (الخط العلوي - الخط السفلي) / الخط الأوسط
+    """
+    try:
+        if middle > 0:
+            return (upper - lower) / middle
+        return 0
+    except Exception:
+        return 0
+        
 # --- [ 3. دالة الجلب والتحليل ] ---
 async def update_crypto_market_data():
-    print(f"\n🚀 {datetime.now().strftime('%H:%M:%S')} | بدء جلب بيانات Binance Vision (شاملة OBV الاستخباراتي)...")
+    print(f"\n🚀 {datetime.now().strftime('%H:%M:%S')} | بدء جلب بيانات الرادار الاستخباراتي (نظام الروابط المتعددة)...")
     
+    # قائمة الروابط الاحتياطية لنطاق الرؤية والبيانات العامة
+    spot_endpoints = [
+        "https://data-api.binance.vision/api/v3/ticker/24hr",
+        "https://data-api2.binance.vision/api/v3/ticker/24hr",
+        "https://data-api3.binance.vision/api/v3/ticker/24hr",
+        "https://api.binance.com/api/v3/ticker/24hr"
+    ]
+    
+    # قائمة روابط العقود الآجلة (Futures) لضمان الفلترة
+    futures_endpoints = [
+        "https://fapi.binance.com/fapi/v1/exchangeInfo",
+        "https://fapi1.binance.com/fapi/v1/exchangeInfo",
+        "https://fapi2.binance.com/fapi/v1/exchangeInfo"
+    ]
+
     async with aiohttp.ClientSession() as session:
+        ticker_data = None
+        futures_symbols = set()
+
         try:
-            async with session.get("https://data-api.binance.vision/api/v3/ticker/24hr", timeout=10) as res:
-                if res.status != 200: return
-                ticker_data = await res.json()
-                if not isinstance(ticker_data, list): return
+            # 1. محاولة جلب قائمة العقود الآجلة من الروابط الاحتياطية
+            for f_url in futures_endpoints:
+                try:
+                    async with session.get(f_url, timeout=7) as f_res:
+                        if f_res.status == 200:
+                            f_data = await f_res.json()
+                            futures_symbols = {
+                                s['symbol'] for s in f_data['symbols'] 
+                                if s['quoteAsset'] == 'USDT' and s['status'] == 'TRADING'
+                            }
+                            print(f"✅ تم جلب قائمة الآجل من: {f_url}")
+                            break
+                except Exception: continue
+
+            if not futures_symbols:
+                print("❌ فشل جلب رموز العقود الآجلة من جميع الروابط.")
+                return
+
+            # 2. محاولة جلب أسعار السوق من روابط Data-API المتعددة
+            for s_url in spot_endpoints:
+                try:
+                    async with session.get(s_url, timeout=7) as res:
+                        if res.status == 200:
+                            ticker_data = await res.json()
+                            print(f"✅ تم جلب أسعار السوق من: {s_url}")
+                            break
+                except Exception: continue
+
+            if not ticker_data:
+                print("❌ فشل جلب بيانات السوق من جميع الروابط الاحتياطية.")
+                return
+
         except Exception as e:
-            logging.error(f"❌ فشل الاتصال بـ API: {e}")
+            logging.error(f"❌ خطأ فني غير متوقع: {e}")
             return
 
-        # الفلتر الخاص بك: السعر >= 0.003
-        top_coins = [
+        # قائمة العملات المستقرة (التي لا تتذبذب)
+        stable_coins = {'USDCUSDT', 'FDUSDUSDT', 'TUSDUSDT', 'BUSDUSDT', 'DAIUSDT', 'EURUSDT', 'GBPUSDT', 'USDEUSDT', 'AEURUSDT'}
+
+        # 🎯 الفلترة الاحترافية (Futures + Price + No Stables)
+        valid_coins = [
             c for c in ticker_data 
             if isinstance(c, dict) 
-            and c.get('symbol', '').endswith('USDT') 
+            and c.get('symbol') in futures_symbols
+            and c.get('symbol') not in stable_coins
             and float(c.get('lastPrice', 0)) >= 0.003
         ]
         
-        # ترتيب حسب أعلى سيولة واختيار أعلى 200 عملة
-        top_coins = sorted(top_coins, key=lambda x: float(x.get('quoteVolume', 0)), reverse=True)[:200]
+        top_coins = sorted(valid_coins, key=lambda x: float(x.get('quoteVolume', 0)), reverse=True)[:200]
         
-        timeframes = ['15m', '1h', '2h', '4h', '1d']
+        timeframes = ['5m', '15m', '1h', '2h', '4h']
         final_records = []
 
         for coin in top_coins:
             symbol = coin.get('symbol')
-            if not symbol: continue
-            
             try:
                 price = float(coin.get('lastPrice', 0))
                 change_percent = float(coin.get('priceChangePercent', 0))
+                
                 record = {
                     "symbol": symbol,
                     "name": symbol.replace("USDT", ""),
                     "current_price": price,
-                    "open_price_24h": float(coin.get('openPrice', 0)),
                     "high_24h": float(coin.get('highPrice', 0)),
                     "low_24h": float(coin.get('lowPrice', 0)),
                     "volume_24h": float(coin.get('volume', 0)),
                     "change_24h": change_percent,
-                    "last_tick_direction": "UP" if change_percent >= 0 else "DOWN",
                     "updated_at": "now()"
                 }
                 
@@ -2422,19 +2521,11 @@ async def update_crypto_market_data():
                         closes = [float(k[4]) for k in results[i]]
                         volumes = [float(k[5]) for k in results[i]]
                         
-                        # --- [ الحسابات الاستخباراتية المتطورة ] ---
                         upper, mid, lower = calculate_bollinger(closes)
+                        bbw_value = (upper - lower) / mid if mid > 0 else 0
                         
-                        # 1. OBV الحالي (باستخدام دالتك)
                         obv_val = calculate_obv(closes, volumes)
-                        
-                        # 2. OBV السابق (باستخدام دالتك مع استثناء آخر شمعة)
                         obv_prev_val = calculate_obv(closes[:-1], volumes[:-1]) if len(closes) > 1 else 0.0
-                        
-                        # 3. حساب ميل السيولة (Slope)
-                        obv_slope_val = obv_val - obv_prev_val
-                        
-                        curr_vol = float(volumes[-1])
 
                         record.update({
                             f"ema_20_{tf}": calculate_ema(closes, 20),
@@ -2444,12 +2535,12 @@ async def update_crypto_market_data():
                             f"bb_upper_{tf}": upper, 
                             f"bb_middle_{tf}": mid, 
                             f"bb_lower_{tf}": lower,
+                            f"bbw_{tf}": bbw_value,
+                            f"volume_{tf}": float(volumes[-1]),
                             f"volume_ma_{tf}": sum(volumes[-20:]) / 20,
-                            f"volume_{tf}": curr_vol,
                             f"obv_{tf}": obv_val,
-                            # --- حقن الأعمدة الجديدة لجميع الفريمات ---
                             f"obv_prev_{tf}": obv_prev_val,
-                            f"obv_slope_{tf}": obv_slope_val
+                            f"obv_slope_{tf}": obv_val - obv_prev_val
                         })
                 final_records.append(record)
             except Exception as e: 
@@ -2457,11 +2548,12 @@ async def update_crypto_market_data():
                 continue
 
         if final_records:
-            print(f"📦 جاري رفع {len(final_records)} عملة مع بيانات 'الجندي المجهول' كاملة...")
+            print(f"📦 جاري رفع {len(final_records)} عملة بنظام الفلترة المزدوجة...")
             for i in range(0, len(final_records), 10):
                 await async_manual_upsert("crypto_market_simulation", final_records[i:i + 10])
     
-    print(f"✅ {datetime.now().strftime('%H:%M:%S')} | تم التحديث والحقن بنجاح.")
+    print(f"✅ {datetime.now().strftime('%H:%M:%S')} | تم التحديث بنجاح باستخدام روابط الحماية.")
+    
     
 
 async def unified_trading_system():
