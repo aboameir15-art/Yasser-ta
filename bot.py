@@ -2444,7 +2444,7 @@ async def update_crypto_market_data():
         # ترتيب حسب أعلى سيولة واختيار أعلى 200 عملة
         top_coins = sorted(top_coins, key=lambda x: float(x.get('quoteVolume', 0)), reverse=True)[:200]
         
-        timeframes = ['5m', '15m', '1h', '2h', '4h']
+        timeframes = ['5m', '15m', '1h', '2h', '4h', '1d']
         final_records = []
 
         for coin in top_coins:
@@ -2457,11 +2457,13 @@ async def update_crypto_market_data():
                     "symbol": symbol,
                     "name": symbol.replace("USDT", ""),
                     "current_price": price,
+                    "open_price_24h": float(coin.get('openPrice', 0)),
                     "high_24h": float(coin.get('highPrice', 0)),
                     "low_24h": float(coin.get('lowPrice', 0)),
                     "volume_24h": float(coin.get('volume', 0)),
                     "change_24h": change_percent,
-                    "updated_at": "now()"
+                    "last_tick_direction": "UP" if change_percent >= 0 else "DOWN",
+                    "updated_at": "now()"    
                 }
                 
                 tasks = [fetch_klines(session, symbol, tf) for tf in timeframes]
