@@ -2419,47 +2419,35 @@ def calculate_bbw(upper, lower, middle):
     except Exception:
         return 0
         
-# --- [ 3. دالة الجلب والتحليل ] ---
+
 async def update_crypto_market_data():
-    print(f"\n🚀 {datetime.now().strftime('%H:%M:%S')} | بدء جلب بيانات الرادار الاستخباراتي المطور...")
+    print(f"\n🚀 {datetime.now().strftime('%H:%M:%S')} | بدء جلب بيانات Binance Vision (شاملة OBV الاستخباراتي)...")
     
     async with aiohttp.ClientSession() as session:
         try:
-            # 1. جلب قائمة العقود الآجلة أولاً لضمان أنها عملات مضاربة حقيقية
-            async with session.get("https://fapi.binance.com/fapi/v1/exchangeInfo", timeout=10) as f_res:
-                if f_res.status != 200: return
-                f_data = await f_res.json()
-                # استخراج الرموز التي تعمل بنظام USDT ووضعها في قائمة
-                futures_symbols = {s['symbol'] for s in f_data['symbols'] if s['quoteAsset'] == 'USDT' and s['status'] == 'TRADING'}
-
-            # 2. جلب أسعار السوق الحالية
             async with session.get("https://data-api.binance.vision/api/v3/ticker/24hr", timeout=10) as res:
                 if res.status != 200: return
                 ticker_data = await res.json()
+                if not isinstance(ticker_data, list): return
         except Exception as e:
             logging.error(f"❌ فشل الاتصال بـ API: {e}")
             return
 
-        # قائمة العملات المستقرة المراد استبعادها (Stablecoins)
+                  
+        # قائمة العملات المستقرة (التي لا تتذبذب)
         stable_coins = {'USDCUSDT', 'FDUSDUSDT', 'TUSDUSDT', 'BUSDUSDT', 'DAIUSDT', 'EURUSDT', 'GBPUSDT', 'USDEUSDT', 'AEURUSDT'}
 
-        # 🎯 الفلترة الاحترافية:
-        # - يجب أن تكون في العقود الآجلة (Futures)
-        # - سعرها >= 0.003
-        # - ليست من العملات المستقرة
-        # - لا تحتوي على رموز قديمة أو مشطوبة
+        # 🎯 الفلترة الاحترافية (Futures + Price + No Stables)
         valid_coins = [
             c for c in ticker_data 
             if isinstance(c, dict) 
-            and c.get('symbol') in futures_symbols  # شرط العقود الآجلة (يحل مشكلة العملات المشطوبة)
-            and c.get('symbol') not in stable_coins # استبعاد العملات الثابتة
+            and c.get('symbol') in futures_symbols
+            and c.get('symbol') not in stable_coins
             and float(c.get('lastPrice', 0)) >= 0.003
         ]
         
-        # اختيار أعلى 200 عملة من حيث السيولة (العقود الآجلة دائماً أعلى سيولة)
         top_coins = sorted(valid_coins, key=lambda x: float(x.get('quoteVolume', 0)), reverse=True)[:200]
         
-        # الفريمات المطلوبة بما فيها الـ 5 دقائق والـ 2 ساعة
         timeframes = ['5m', '15m', '1h', '2h', '4h']
         final_records = []
 
@@ -2468,9 +2456,6 @@ async def update_crypto_market_data():
             try:
                 price = float(coin.get('lastPrice', 0))
                 change_percent = float(coin.get('priceChangePercent', 0))
-                
-                # جلب قيمة BBW الحالية من سوبابيس لتصبح هي الـ Prev (خطوة استباقية)
-                # ملاحظة: يفضل جلبها مرة واحدة في البداية لتوفير الوقت، أو تحديثها مباشرة في الـ Upsert
                 
                 record = {
                     "symbol": symbol,
@@ -2491,13 +2476,9 @@ async def update_crypto_market_data():
                         closes = [float(k[4]) for k in results[i]]
                         volumes = [float(k[5]) for k in results[i]]
                         
-                        # حساب البولنجر
                         upper, mid, lower = calculate_bollinger(closes)
-                        
-                        # --- [ حساب BBW الجديد الاستخباراتي ] ---
                         bbw_value = (upper - lower) / mid if mid > 0 else 0
                         
-                        # حساب OBV
                         obv_val = calculate_obv(closes, volumes)
                         obv_prev_val = calculate_obv(closes[:-1], volumes[:-1]) if len(closes) > 1 else 0.0
 
@@ -2509,7 +2490,7 @@ async def update_crypto_market_data():
                             f"bb_upper_{tf}": upper, 
                             f"bb_middle_{tf}": mid, 
                             f"bb_lower_{tf}": lower,
-                            f"bbw_{tf}": bbw_value, # حقن عرض القناة الجديد
+                            f"bbw_{tf}": bbw_value,
                             f"volume_{tf}": float(volumes[-1]),
                             f"volume_ma_{tf}": sum(volumes[-20:]) / 20,
                             f"obv_{tf}": obv_val,
@@ -2522,12 +2503,12 @@ async def update_crypto_market_data():
                 continue
 
         if final_records:
-            print(f"📦 جاري رفع {len(final_records)} عملة (Futures Only) إلى سوبابيس...")
+            print(f"📦 جاري رفع {len(final_records)} عملة بنظام الفلترة المزدوجة...")
             for i in range(0, len(final_records), 10):
                 await async_manual_upsert("crypto_market_simulation", final_records[i:i + 10])
     
-    print(f"✅ {datetime.now().strftime('%H:%M:%S')} | تم التحديث والحقن بنجاح.")
-
+    print(f"✅ {datetime.now().strftime('%H:%M:%S')} | تم التحديث بنجاح باستخدام روابط الحماية.")
+    
 
 async def unified_trading_system():
     """هذه الدالة هي المايسترو: تحديث البيانات -> انتظار دقيقة -> تحليل الرادار"""
