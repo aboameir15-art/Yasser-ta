@@ -2442,28 +2442,25 @@ async def update_crypto_market_data():
         ]
         
         # ترتيب حسب أعلى سيولة واختيار أعلى 200 عملة
-        top_coins = sorted(top_coins, key=lambda x: float(x.get('quoteVolume', 0)), reverse=True)[:200]
+        top_coins = sorted(valid_coins, key=lambda x: float(x.get('quoteVolume', 0)), reverse=True)[:200]
         
-        timeframes = ['15m', '1h', '2h', '4h', '1d']
+        timeframes = ['5m', '15m', '1h', '2h', '4h']
         final_records = []
 
         for coin in top_coins:
             symbol = coin.get('symbol')
-            if not symbol: continue
-            
             try:
                 price = float(coin.get('lastPrice', 0))
                 change_percent = float(coin.get('priceChangePercent', 0))
+                
                 record = {
                     "symbol": symbol,
                     "name": symbol.replace("USDT", ""),
                     "current_price": price,
-                    "open_price_24h": float(coin.get('openPrice', 0)),
                     "high_24h": float(coin.get('highPrice', 0)),
                     "low_24h": float(coin.get('lowPrice', 0)),
                     "volume_24h": float(coin.get('volume', 0)),
                     "change_24h": change_percent,
-                    "last_tick_direction": "UP" if change_percent >= 0 else "DOWN",
                     "updated_at": "now()"
                 }
                 
@@ -2475,19 +2472,11 @@ async def update_crypto_market_data():
                         closes = [float(k[4]) for k in results[i]]
                         volumes = [float(k[5]) for k in results[i]]
                         
-                        # --- [ الحسابات الاستخباراتية المتطورة ] ---
                         upper, mid, lower = calculate_bollinger(closes)
+                        bbw_value = (upper - lower) / mid if mid > 0 else 0
                         
-                        # 1. OBV الحالي (باستخدام دالتك)
                         obv_val = calculate_obv(closes, volumes)
-                        
-                        # 2. OBV السابق (باستخدام دالتك مع استثناء آخر شمعة)
                         obv_prev_val = calculate_obv(closes[:-1], volumes[:-1]) if len(closes) > 1 else 0.0
-                        
-                        # 3. حساب ميل السيولة (Slope)
-                        obv_slope_val = obv_val - obv_prev_val
-                        
-                        curr_vol = float(volumes[-1])
 
                         record.update({
                             f"ema_20_{tf}": calculate_ema(closes, 20),
@@ -2497,13 +2486,14 @@ async def update_crypto_market_data():
                             f"bb_upper_{tf}": upper, 
                             f"bb_middle_{tf}": mid, 
                             f"bb_lower_{tf}": lower,
+                            f"bbw_{tf}": bbw_value,
+                            f"volume_{tf}": float(volumes[-1]),
                             f"volume_ma_{tf}": sum(volumes[-20:]) / 20,
-                            f"volume_{tf}": curr_vol,
                             f"obv_{tf}": obv_val,
-                            # --- حقن الأعمدة الجديدة لجميع الفريمات ---
                             f"obv_prev_{tf}": obv_prev_val,
-                            f"obv_slope_{tf}": obv_slope_val
+                            f"obv_slope_{tf}": obv_val - obv_prev_val
                         })
+
                 final_records.append(record)
             except Exception as e: 
                 logging.error(f"❌ خطأ في معالجة {symbol}: {e}")
