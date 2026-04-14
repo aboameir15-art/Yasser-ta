@@ -2419,39 +2419,32 @@ def calculate_bbw(upper, lower, middle):
     except Exception:
         return 0
         
-
-
+# --- [ 3. دالة الجلب والتحليل ] ---
 async def update_crypto_market_data():
-    print(f"\n🚀 {datetime.now().strftime('%H:%M:%S')} | بدء جلب بيانات Binance Vision (المحرك المعتمد v7.0)...")
+    print(f"\n🚀 {datetime.now().strftime('%H:%M:%S')} | بدء جلب بيانات Binance Vision (شاملة OBV الاستخباراتي)...")
     
     async with aiohttp.ClientSession() as session:
         try:
-            # الاعتماد على الرابط المستقر كما طلبت
             async with session.get("https://data-api.binance.vision/api/v3/ticker/24hr", timeout=10) as res:
-                if res.status != 200: 
-                    print("⚠️ الرابط لم يستجب، سيتم المحاولة في الدورة القادمة.")
-                    return
+                if res.status != 200: return
                 ticker_data = await res.json()
                 if not isinstance(ticker_data, list): return
         except Exception as e:
             logging.error(f"❌ فشل الاتصال بـ API: {e}")
             return
 
-        # فلترك الخاص (السعر >= 0.003) + استبعاد العملات المستقرة لضمان "اللعنة" على المتذبذبات فقط
-        stable_coins = {'USDCUSDT', 'FDUSDUSDT', 'TUSDUSDT', 'BUSDUSDT', 'DAIUSDT', 'USDEUSDT'}
-        
+        # الفلتر الخاص بك: السعر >= 0.003
         top_coins = [
             c for c in ticker_data 
             if isinstance(c, dict) 
             and c.get('symbol', '').endswith('USDT') 
-            and c.get('symbol') not in stable_coins
             and float(c.get('lastPrice', 0)) >= 0.003
         ]
         
-        # الترتيب حسب السيولة (أعلى 200 عملة لجعل الرادار يركز على "الأهداف الدسمة")
+        # ترتيب حسب أعلى سيولة واختيار أعلى 200 عملة
         top_coins = sorted(top_coins, key=lambda x: float(x.get('quoteVolume', 0)), reverse=True)[:200]
         
-        timeframes = ['5m', '15m', '1h', '2h', '4h', '1d'] # أضفنا الـ 5m للرصد المبكر جداً
+        timeframes = ['15m', '1h', '2h', '4h', '1d']
         final_records = []
 
         for coin in top_coins:
@@ -2461,15 +2454,16 @@ async def update_crypto_market_data():
             try:
                 price = float(coin.get('lastPrice', 0))
                 change_percent = float(coin.get('priceChangePercent', 0))
-                
                 record = {
                     "symbol": symbol,
                     "name": symbol.replace("USDT", ""),
                     "current_price": price,
+                    "open_price_24h": float(coin.get('openPrice', 0)),
                     "high_24h": float(coin.get('highPrice', 0)),
                     "low_24h": float(coin.get('lowPrice', 0)),
                     "volume_24h": float(coin.get('volume', 0)),
                     "change_24h": change_percent,
+                    "last_tick_direction": "UP" if change_percent >= 0 else "DOWN",
                     "updated_at": "now()"
                 }
                 
@@ -2477,24 +2471,23 @@ async def update_crypto_market_data():
                 results = await asyncio.gather(*tasks)
 
                 for i, tf in enumerate(timeframes):
-                    if results[i] and len(results[i]) > 20:
+                    if results[i] and isinstance(results[i], list):
                         closes = [float(k[4]) for k in results[i]]
                         volumes = [float(k[5]) for k in results[i]]
                         
-                        # حساب البولنجر
+                        # --- [ الحسابات الاستخباراتية المتطورة ] ---
                         upper, mid, lower = calculate_bollinger(closes)
                         
-                        # --- [ حقن بيانات الانفجار BBW ] ---
-                        bbw_now = (upper - lower) / mid if mid > 0 else 0
-                        
-                        # حساب BBW السابق للمقارنة (تحديد فتح فم التمساح)
-                        prev_upper, prev_mid, prev_lower = calculate_bollinger(closes[:-1])
-                        bbw_prev = (prev_upper - prev_lower) / prev_mid if prev_mid > 0 else 0.01
-
-                        # حساب السيولة OBV
+                        # 1. OBV الحالي (باستخدام دالتك)
                         obv_val = calculate_obv(closes, volumes)
-                        obv_prev_val = calculate_obv(closes[:-1], volumes[:-1])
+                        
+                        # 2. OBV السابق (باستخدام دالتك مع استثناء آخر شمعة)
+                        obv_prev_val = calculate_obv(closes[:-1], volumes[:-1]) if len(closes) > 1 else 0.0
+                        
+                        # 3. حساب ميل السيولة (Slope)
                         obv_slope_val = obv_val - obv_prev_val
+                        
+                        curr_vol = float(volumes[-1])
 
                         record.update({
                             f"ema_20_{tf}": calculate_ema(closes, 20),
@@ -2504,11 +2497,10 @@ async def update_crypto_market_data():
                             f"bb_upper_{tf}": upper, 
                             f"bb_middle_{tf}": mid, 
                             f"bb_lower_{tf}": lower,
-                            f"bbw_{tf}": bbw_now,
-                            f"bbw_prev_{tf}": bbw_prev,
-                            f"volume_{tf}": float(volumes[-1]),
                             f"volume_ma_{tf}": sum(volumes[-20:]) / 20,
+                            f"volume_{tf}": curr_vol,
                             f"obv_{tf}": obv_val,
+                            # --- حقن الأعمدة الجديدة لجميع الفريمات ---
                             f"obv_prev_{tf}": obv_prev_val,
                             f"obv_slope_{tf}": obv_slope_val
                         })
@@ -2518,87 +2510,77 @@ async def update_crypto_market_data():
                 continue
 
         if final_records:
-            print(f"📦 جاري رفع {len(final_records)} عملة إلى سوبابيس...")
+            print(f"📦 جاري رفع {len(final_records)} عملة مع بيانات 'الجندي المجهول' كاملة...")
             for i in range(0, len(final_records), 10):
                 await async_manual_upsert("crypto_market_simulation", final_records[i:i + 10])
     
-    print(f"✅ {datetime.now().strftime('%H:%M:%S')} | تم التحديث بنجاح.")
-
-
-import asyncio
+    print(f"✅ {datetime.now().strftime('%H:%M:%S')} | تم التحديث والحقن بنجاح.")
+    
 
 async def unified_trading_system():
-    """المايسترو v7.0: نظام الرصد المستمر مع حماية من الانهيار"""
-    print("🔥 تم تفعيل نظام المايسترو الاستخباراتي...")
-    
+    """هذه الدالة هي المايسترو: تحديث البيانات -> انتظار دقيقة -> تحليل الرادار"""
     while True:
         try:
-            # 1. جلب البيانات (المصنع)
-            # وضعنا timeout داخلي لضمان أن المصنع لا يعلق للأبد
-            await asyncio.wait_for(update_crypto_market_data(), timeout=180)
-            
-            print("✅ المصنع أكمل الحقن. انتظار 20 ثانية لتستقر البيانات...")
-            await asyncio.sleep(20)
+            # أولاً: المصنع يشتغل ويحدث كل الفريمات والجندي المجهول
+            await update_crypto_market_data()
+            print("✅ المصنع أكمل الحقن بنجاح. انتظار 60 ثانية للرادار...")
+            await asyncio.sleep(60)
 
-            # 2. تحليل الرادار (الاستخبارات)
-            print("📡 نداء للرادار: ابدأ مسح الأهداف المكتشفة...")
-            await asyncio.wait_for(intelligence_scanner(), timeout=120)
+            # ثانياً: المصنع ينادي الرادار (تعال شف شغلك)
+            print("📡 نداء للرادار: البيانات جاهزة في سوبابيس، ابدأ المسح...")
+            await intelligence_scanner()
             
-            print("⏳ جولة ناجحة. استراحة المحارب 120 ثانية...")
+            # ثالثاً: الرادار يخلص وينتظر دقيقة قبل الجولة الجديدة للمصنع
+            print("⏳ جولة كاملة تمت. استراحة 60 ثانية قبل التحديث القادم...")
             await asyncio.sleep(120)
             
-        except asyncio.TimeoutError:
-            logging.error("⚠️ تحذير: إحدى العمليات استغرقت وقتاً طويلاً (Timeout). إعادة المحاولة...")
-            await asyncio.sleep(10)
         except Exception as e:
             logging.error(f"⚠️ خطأ في النظام الموحد: {e}")
-            # إذا حدث خطأ في الاتصال، ننتظر قليلاً ثم نعود للهجوم
-            await asyncio.sleep(30)
-
+            await asyncio.sleep(30) # انتظار قصير للتعافي
+            
 # ==========================================
 # 5. نهاية الملف: نظام الإنعاش الأبدي 24/7 (النبض الذاتي) ⚡
 # ==========================================
-import random
-import aiohttp
-import asyncio
-import logging
 from aiohttp import web
 import os
+import asyncio
 
-# 1. هاندلر الـ Ping لضمان استجابة السيرفر لطلبات Render
 async def handle_ping(request):
-    return web.Response(
-        text="🚀 البوت يعمل بنبض مستقر - الرادار يراقب الأهداف", 
-        headers={"Connection": "keep-alive"}
-    )
+    return web.Response(text="🚀 البوت يعمل بنبض مستقر")
 
 async def handle_telegram_login(request):
     return web.Response(text="✅ تم استقبال البيانات")
 
-# 2. 🪄 الخدعة السحرية: النبض الذاتي (البوت يوقظ نفسه)
+
+async def handle_ping(request):
+    # إضافة هيدر يخبر ريندر أن الاتصال يجب أن يبقى حياً
+    return web.Response(
+        text="Alive ⚡", 
+        headers={"Connection": "keep-alive"}
+    )
+
+# 2. 🪄 الخدعة السحرية: النبض الذاتي (البوت يوقظ ن
+
 async def self_resuscitation():
-    """هذه الدالة تمنع Render من إيقاف البوت عبر إرسال طلبات لنفسه كل 4 دقائق"""
     render_url = os.getenv("RENDER_EXTERNAL_URL") 
-    if not render_url:
-        logging.warning("⚠️ لم يتم العثور على RENDER_EXTERNAL_URL - نظام الإنعاش معطل.")
-        return
+    if not render_url: return
 
     while True:
         try:
-            # إضافة رقم عشوائي لكسر الكاش (Cache) لضمان وصول الطلب للسيرفر فعلياً
+            # إضافة رقم عشوائي في نهاية الرابط لكسر "التخزين المؤقت" لـ ريندر
+            # سيصبح الرابط مثل: https://bot.onrender.com/?v=12345
             rand_ping = f"{render_url}?v={random.randint(1, 99999)}"
             
             async with aiohttp.ClientSession() as session:
                 async with session.get(rand_ping, timeout=10) as response:
-                    if response.status == 200:
-                        logging.info(f"💉 [نبضة حية]: تم إيقاظ السيرفر بنجاح | Status: {response.status}")
+                    logging.info(f"💉 [نبضة حية]: {response.status} | الرابط: {rand_ping}")
         except Exception as e:
             logging.error(f"⚠️ [فشل النبض]: {e}")
         
-        # الانتظار 4 دقائق (240 ثانية) - Render ينام بعد 15 دقيقة خمول، فنحن نوقظه كل 4 دقائق
+        # اجعلها كل 4 دقائق (240 ثانية) - كن "مزعجاً" لسيرفر ريندر لكي لا ينام
         await asyncio.sleep(240)
-
-# 3. محرك الإقلاع الرئيسي
+        
+            
 async def main_startup():
     # أ) إعداد سيرفر الويب (لبقاء البوت متصلاً على Render)
     app = web.Application()
@@ -2607,50 +2589,44 @@ async def main_startup():
     
     runner = web.AppRunner(app)
     await runner.setup()
-    
-    # بورت ريندر الافتراضي
     port = int(os.environ.get("PORT", 10000))
     site = web.TCPSite(runner, '0.0.0.0', port)
     await site.start()
-    logging.info(f"🌐 تم تشغيل سيرفر النبض على المنفذ: {port}")
-
-    # ب) تشغيل المحركات الاستخباراتية في الخلفية كـ Tasks مستقلة
-    logging.info("⏳ جاري استدعاء الجندي المجهول وتشغيل رادار الإعصار...")
+    logging.info(f"🌐 Server started on port {port}")
+    # ب) تشغيل محركات التداول والاستخبارات في الخلفية
+    # ب) تشغيل محركات التداول في الخلفية
+    logging.info("⏳ جاري تشغيل محركات السوق ورادار الأسرار...")
     
-    # 1. نظام الإنعاش الذاتي (لإبقاء السيرفر حياً)
-    asyncio.create_task(self_resuscitation())
-    
-    # 2. محرك تصفية الصفقات (الـ Reaper) لضمان الخروج الآمن
+    # 1. محرك تصفية الصفقات (الـ Reaper)    
     asyncio.create_task(trade_reaper()) 
     
-    # 3. النظام الموحد (تحديث البيانات + مسح الرادار)
-    # ملاحظة: وضعناه في Task مستقلة لكي لا يمنع البوت من استقبال الأوامر
+    # 2 & 3. النظام الموحد (المصنع + الرادار) - تم الدمج لضمان التتابع
+    # هذا المحرك سيقوم بالتحديث أولاً، ثم ينادي الرادار تلقائياً
     asyncio.create_task(unified_trading_system())
        
-    # ج) تشغيل محرك التليجرام (Aiogram)
+    # ج) تشغيل البوت (لإصدار Aiogram 2.x)
     try:
-        logging.info("🚀 محرك التليجرام جاهز.. النظام الموحد تحت سيطرتك يا أثر.")
+        logging.info("🚀 جاري إقلاع محرك التليجرام... النظام الموحد الآن تحت سيطرتك يا أثر.")
         
-        # مسح التحديثات القديمة لضمان عدم حدوث Loop أخطاء عند البدء
         await dp.skip_updates()
-        
-        # البدء في استقبال الرسائل
         await dp.start_polling()
         
     except Exception as e:
-        logging.error(f"❌ خطأ كارثي في تشغيل البوت: {e}")
+        logging.error(f"❌ خطأ في تشغيل البوت: {e}")
             
     finally:
-        # الإغلاق الآمن في حال توقف البرنامج
-        logging.info("🛑 إغلاق الاتصالات الاستخباراتية...")
+        # الإغلاق الآمن لتجنب تحذيرات (NoneType)
+        logging.info("🛑 جاري إغلاق الاتصال بأمان...")
         await bot.close()
         await dp.storage.close()
         await dp.storage.wait_closed()
         
 if __name__ == '__main__':
-    # تشغيل الـ Event Loop لضمان عدم تضارب المهام
+    # دمج جميع العمليات في مسار واحد (Event Loop) يمنع التضارب
+    loop = asyncio.get_event_loop()
     try:
-        asyncio.run(main_startup())
+        loop.run_until_complete(main_startup())
     except KeyboardInterrupt:
-        logging.info("🛑 تم إيقاف النظام يدوياً.")
-        
+        logging.info("🛑 تم إيقاف البوت يدوياً.")
+
+
