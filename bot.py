@@ -2456,23 +2456,31 @@ def calculate_bbw(upper, lower, middle):
 # --- [ 3. دالة الجلب والتحليل ] ---
 # --- [ 3. دالة الجلب والتحليل المحدثة v8.0 ] ---
 async def fetch_futures_data_safe(session, symbol):
-    """جلب بيانات الحطب (OI) والوقود (Funding) - محصن ضد الحظر"""
-    # نستخدم fapi لجلب البيانات، وفي حال الفشل نعود بـ 0 لضمان استمرار الرادار
+    # نستخدم fapi.binance.com ولكن سنضيف منطقاً للتأكد من استلام البيانات
     oi_url = f"https://fapi.binance.com/fapi/v1/openInterest?symbol={symbol}"
     fund_url = f"https://fapi.binance.com/fapi/v1/premiumIndex?symbol={symbol}"
+    
     oi_val, fund_val = 0.0, 0.0
     try:
+        # ملاحظة: بعض العملات في السبوت غير موجودة في الفيوتشرز
         async with session.get(oi_url, timeout=5) as res:
             if res.status == 200:
                 data = await res.json()
                 oi_val = float(data.get('openInterest', 0))
+            else:
+                # لو طبع هذا، يعني أن العملة غير موجودة في سوق العقود الآجلة
+                logging.warning(f"ℹ️ {symbol} غير مدعومة في سوق العقود (No Futures)")
+        
         async with session.get(fund_url, timeout=5) as res:
             if res.status == 200:
                 data = await res.json()
+                # جلب معدل التمويل بدقة
                 fund_val = float(data.get('lastFundingRate', 0))
-    except: pass 
+    except Exception as e:
+        logging.error(f"⚠️ فشل الوصول لبيانات العقود لـ {symbol}: {e}")
+    
     return oi_val, fund_val
-
+    
 async def fetch_klines(session, symbol, interval, limit=100):
     # استخدام رابط الـ Vision لتجنب حظر سيرفر راندر
     url = f"https://data-api.binance.vision/api/v3/klines?symbol={symbol}&interval={interval}&limit={limit}"
