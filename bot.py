@@ -2434,11 +2434,16 @@ async def update_crypto_market_data():
             return
 
         # الفلتر الخاص بك: السعر >= 0.003
-        top_coins = [
+        # قائمة العملات المستقرة (التي لا تتذبذب)
+        stable_coins = {'USDCUSDT', 'FDUSDUSDT', 'TUSDUSDT', 'BUSDUSDT', 'DAIUSDT', 'EURUSDT', 'GBPUSDT', 'USDEUSDT', 'AEURUSDT'}
+
+        # 🎯 الفلترة الاحترافية (Futures + Price + No Stables)
+        valid_coins = [
             c for c in ticker_data 
             if isinstance(c, dict) 
-            and c.get('symbol', '').endswith('USDT') 
-            and float(c.get('lastPrice', 0)) >= 0.003
+            and c.get('symbol') in futures_symbols
+            and c.get('symbol') not in stable_coins
+            and float(c.get('lastPrice', 0)) >= 0.003          
         ]
         
         # ترتيب حسب أعلى سيولة واختيار أعلى 200 عملة
