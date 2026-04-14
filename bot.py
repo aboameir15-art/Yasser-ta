@@ -2533,48 +2533,60 @@ async def unified_trading_system():
 # ==========================================
 # 5. نهاية الملف: نظام الإنعاش الأبدي 24/7 (النبض الذاتي) ⚡
 # ==========================================
-from aiohttp import web
 import os
 import asyncio
+import logging
+import random
+import aiohttp
+from aiohttp import web
+
+# ==========================================
+# 5. نظام الإنعاش الأبدي: "لا تأخذه سنة ولا نوم" ⚡
+# ==========================================
 
 async def handle_ping(request):
-    return web.Response(text="🚀 البوت يعمل بنبض مستقر")
-
-async def handle_telegram_login(request):
-    return web.Response(text="✅ تم استقبال البيانات")
-
-
-async def handle_ping(request):
-    # إضافة هيدر يخبر ريندر أن الاتصال يجب أن يبقى حياً
+    """استجابة سريعة لإخبار السيرفر أن النظام مستيقظ"""
     return web.Response(
-        text="Alive ⚡", 
+        text="Alive & Vigilant ⚡", 
         headers={"Connection": "keep-alive"}
     )
 
-# 2. 🪄 الخدعة السحرية: النبض الذاتي (البوت يوقظ ن
+async def handle_telegram_login(request):
+    return web.Response(text="✅ Data Received")
 
 async def self_resuscitation():
+    """النبض الذاتي: البوت يوقظ نفسه لمنع النوم (Anti-Idle)"""
     render_url = os.getenv("RENDER_EXTERNAL_URL") 
     if not render_url: return
 
     while True:
         try:
-            # إضافة رقم عشوائي في نهاية الرابط لكسر "التخزين المؤقت" لـ ريندر
-            # سيصبح الرابط مثل: https://bot.onrender.com/?v=12345
+            # كسر التخزين المؤقت لضمان وصول الطلب للمعالج مباشرة
             rand_ping = f"{render_url}?v={random.randint(1, 99999)}"
-            
             async with aiohttp.ClientSession() as session:
                 async with session.get(rand_ping, timeout=10) as response:
-                    logging.info(f"💉 [نبضة حية]: {response.status} | الرابط: {rand_ping}")
+                    logging.info(f"💉 [نبضة حية]: {response.status}")
         except Exception as e:
             logging.error(f"⚠️ [فشل النبض]: {e}")
         
-        # اجعلها كل 4 دقائق (240 ثانية) - كن "مزعجاً" لسيرفر ريندر لكي لا ينام
-        await asyncio.sleep(240)
-        
-            
+        await asyncio.sleep(240) # كل 4 دقائق
+
+async def watch_dog(task_func, *args):
+    """
+    بروتوكول اليقظة: مراقب دائم للمحركات.
+    إذا توقف أي محرك (سنة) أو انهار (نوم)، يعيده للحياة فوراً.
+    """
+    while True:
+        try:
+            logging.info(f"🛡️ تشغيل محرك: {task_func.__name__}")
+            await task_func(*args)
+        except Exception as e:
+            logging.error(f"🚨 انهيار في {task_func.__name__}: {e}")
+            logging.info("♻️ إعادة التشغيل التلقائي الآن...")
+            await asyncio.sleep(5) # انتظار بسيط لتجنب التكرار السريع عند الخطأ
+
 async def main_startup():
-    # أ) إعداد سيرفر الويب (لبقاء البوت متصلاً على Render)
+    # أ) إعداد سيرفر الويب للبقاء Online
     app = web.Application()
     app.router.add_get('/', handle_ping)
     app.router.add_get('/login', handle_telegram_login)
@@ -2584,41 +2596,32 @@ async def main_startup():
     port = int(os.environ.get("PORT", 10000))
     site = web.TCPSite(runner, '0.0.0.0', port)
     await site.start()
-    logging.info(f"🌐 Server started on port {port}")
-    # ب) تشغيل محركات التداول والاستخبارات في الخلفية
-    # ب) تشغيل محركات التداول في الخلفية
-    logging.info("⏳ جاري تشغيل محركات السوق ورادار الأسرار...")
+    logging.info(f"🌐 Server Active on port {port}")
+
+    # ب) تشغيل المحركات تحت حماية الـ WatchDog (لا نوم بعد اليوم)
+    # 1. نظام النبض الذاتي
+    asyncio.create_task(watch_dog(self_resuscitation))
     
-    # 1. محرك تصفية الصفقات (الـ Reaper)    
-    asyncio.create_task(trade_reaper()) 
+    # 2. محرك التداول (Reaper)
+    asyncio.create_task(watch_dog(trade_reaper)) 
     
-    # 2 & 3. النظام الموحد (المصنع + الرادار) - تم الدمج لضمان التتابع
-    # هذا المحرك سيقوم بالتحديث أولاً، ثم ينادي الرادار تلقائياً
-    asyncio.create_task(unified_trading_system())
+    # 3. النظام الموحد (المصنع + الرادار)
+    asyncio.create_task(watch_dog(unified_trading_system))
        
-    # ج) تشغيل البوت (لإصدار Aiogram 2.x)
-    try:
-        logging.info("🚀 جاري إقلاع محرك التليجرام... النظام الموحد الآن تحت سيطرتك يا أثر.")
-        
-        await dp.skip_updates()
-        await dp.start_polling()
-        
-    except Exception as e:
-        logging.error(f"❌ خطأ في تشغيل البوت: {e}")
-            
-    finally:
-        # الإغلاق الآمن لتجنب تحذيرات (NoneType)
-        logging.info("🛑 جاري إغلاق الاتصال بأمان...")
-        await bot.close()
-        await dp.storage.close()
-        await dp.storage.wait_closed()
-        
+    # ج) تشغيل البوت الرئيسي (Aiogram) مع نظام إعادة المحاولة
+    while True:
+        try:
+            logging.info("🚀 إقلاع محرك التليجرام... النظام تحت الحماية القصوى.")
+            await dp.skip_updates()
+            await dp.start_polling()
+        except Exception as e:
+            logging.error(f"❌ خطأ في البوت: {e}")
+            await asyncio.sleep(10) # انتظر 10 ثوانٍ وأعد المحاولة تلقائياً
+
 if __name__ == '__main__':
-    # دمج جميع العمليات في مسار واحد (Event Loop) يمنع التضارب
-    loop = asyncio.get_event_loop()
     try:
-        loop.run_until_complete(main_startup())
+        asyncio.run(main_startup())
     except KeyboardInterrupt:
-        logging.info("🛑 تم إيقاف البوت يدوياً.")
-
-
+        logging.info("🛑 تم إيقاف النظام يدوياً.")
+        
+    
