@@ -2440,9 +2440,9 @@ async def update_crypto_market_data():
             and c.get('symbol', '').endswith('USDT') 
             and float(c.get('lastPrice', 0)) >= 0.003
         ]
-                
+        
         # ترتيب حسب أعلى سيولة واختيار أعلى 200 عملة
-        top_coins = sorted(valid_coins, key=lambda x: float(x.get('quoteVolume', 0)), reverse=True)[:200]
+        top_coins = sorted(top_coins, key=lambda x: float(x.get('quoteVolume', 0)), reverse=True)[:200]
         
         timeframes = ['5m', '15m', '1h', '2h', '4h']
         final_records = []
