@@ -2333,7 +2333,9 @@ async def async_manual_upsert(table_name, records):
             logging.error(f"⚠️ خطأ في الرفع: {e}")
             return False
 
-# --- [ 2. دوال الحساب الرياضي الدقيقة (بدون Pandas) ] ---
+# ==========================================
+# --- [ دوال الحساب الرياضي ] ---
+# ==========================================
 def calculate_ema(data, period):
     if len(data) < period: return data[-1]
     alpha = 2 / (period + 1)
@@ -2357,57 +2359,15 @@ def calculate_rsi(data, period=14):
         avg_loss = (avg_loss * (period - 1) + losses[i]) / period
     rs = avg_gain / avg_loss
     return 100 - (100 / (1 + rs))
-   
 
-#--- [ دوال الحساب الرياضي v8.0 - مختبر الأسرار ] ---
-def calculate_atr(highs, lows, closes, period=14):
-    """
-    مؤشر ATR: يقيس "نفس" السوق وقوة تذبذبه.
-    إذا كان الـ ATR يتقلص، فهذا يعني أن الانفجار يقترب.
-    """
-    if len(closes) < period + 1: return 0.0
-    
-    tr_list = []
-    for i in range(1, len(closes)):
-        tr = max(
-            highs[i] - lows[i],
-            abs(highs[i] - closes[i-1]),
-            abs(lows[i] - closes[i-1])
-        )
-        tr_list.append(tr)
-    
-    # حساب المتوسط المتحرك البسيط للـ TR
-    return sum(tr_list[-period:]) / period
-    
-
-def calculate_keltner_channels(highs, lows, closes, ema_period=20, atr_period=10, multiplier=2):
-    """
-    قنوات كيلتنر (KC): "حدود الملعب" الحقيقية.
-    عندما يختنق البولنجر داخل هذه القنوات، فنحن أمام بركان أوشك على الثوران.
-    """
-    if len(closes) < max(ema_period, atr_period) + 1:
-        return closes[-1], closes[-1], closes[-1]
-    
-    # الخط الأوسط هو EMA للسعر
-    middle_line = calculate_ema(closes, ema_period)
-    
-    # حساب الـ ATR لاستخدامه في عرض القنوات
-    atr_value = calculate_atr(highs, lows, closes, atr_period)
-    
-    upper_line = middle_line + (multiplier * atr_value)
-    lower_line = middle_line - (multiplier * atr_value)
-    
-    return upper_line, middle_line, lower_line
-
-# --- [ تحديث بسيط لدالة البولنجر لضمان الدقة ] ---
-def calculate_bollinger(data, period=20, std_dev_multiplier=2):
-    if len(data) < period: 
-        return data[-1], data[-1], data[-1]
+def calculate_bollinger(data, period=20):
+    if len(data) < period: return data[-1], data[-1], data[-1]
     recent = data[-period:]
     sma = sum(recent) / period
     variance = sum((x - sma) ** 2 for x in recent) / period
     std_dev = math.sqrt(variance)
-    return sma + (std_dev * std_dev_multiplier), sma, sma - (std_dev * std_dev_multiplier)
+    return sma + (std_dev * 2), sma, sma - (std_dev * 2)
+
 
 def calculate_volume(volumes):
     """
@@ -2452,63 +2412,45 @@ def calculate_bbw(upper, lower, middle):
         return 0
     except Exception:
         return 0
-        
-# --- [ 3. دالة الجلب والتحليل ] ---
-# --- [ 3. دالة الجلب والتحليل المحدثة v8.0 ] ---
-async def fetch_futures_data_safe(session, symbol):
-    # نستخدم fapi.binance.com ولكن سنضيف منطقاً للتأكد من استلام البيانات
-    oi_url = f"https://fapi.binance.com/fapi/v1/openInterest?symbol={symbol}"
-    fund_url = f"https://fapi.binance.com/fapi/v1/premiumIndex?symbol={symbol}"
+  
+def calculate_atr(highs, lows, closes, period=14):
+    if len(closes) < period + 1: return 0.0
+    tr_list = []
+    for i in range(1, len(closes)):
+        tr = max(highs[i] - lows[i], abs(highs[i] - closes[i-1]), abs(lows[i] - closes[i-1]))
+        tr_list.append(tr)
+    return sum(tr_list[-period:]) / period
+
+def calculate_keltner_channels(highs, lows, closes, ema_period=20, atr_period=10, multiplier=2):
+    if len(closes) < max(ema_period, atr_period) + 1:
+        return closes[-1], closes[-1], closes[-1]
+    mid = calculate_ema(closes, ema_period)
+    atr_v = calculate_atr(highs, lows, closes, atr_period)
+    return mid + (multiplier * atr_v), mid, mid - (multiplier * atr_v)
     
-    oi_val, fund_val = 0.0, 0.0
-    try:
-        # ملاحظة: بعض العملات في السبوت غير موجودة في الفيوتشرز
-        async with session.get(oi_url, timeout=5) as res:
-            if res.status == 200:
-                data = await res.json()
-                oi_val = float(data.get('openInterest', 0))
-            else:
-                # لو طبع هذا، يعني أن العملة غير موجودة في سوق العقود الآجلة
-                logging.warning(f"ℹ️ {symbol} غير مدعومة في سوق العقود (No Futures)")
-        
-        async with session.get(fund_url, timeout=5) as res:
-            if res.status == 200:
-                data = await res.json()
-                # جلب معدل التمويل بدقة
-                fund_val = float(data.get('lastFundingRate', 0))
-    except Exception as e:
-        logging.error(f"⚠️ فشل الوصول لبيانات العقود لـ {symbol}: {e}")
-    
-    return oi_val, fund_val
-    
+# ==========================================
+# --- [ دوال التحليل و الجلب ] ---
+# ==========================================   
 async def fetch_klines(session, symbol, interval, limit=100):
-    # استخدام رابط الـ Vision لتجنب حظر سيرفر راندر
     url = f"https://data-api.binance.vision/api/v3/klines?symbol={symbol}&interval={interval}&limit={limit}"
     try:
+        # تم تعديل التايم أوت إلى 10 ثواني لضمان عدم فشل الاتصال
         async with session.get(url, timeout=10) as res:
-            if res.status == 200: 
-                return await res.json()
-            else:
-                logging.error(f"⚠️ فشل جلب klines لـ {symbol} فريم {interval}: كود {res.status}")
-                return None
-    except Exception as e:
-        logging.error(f"❌ خطأ اتصال (Vision API) لـ {symbol}: {e}")
-        return None
+            if res.status == 200: return await res.json()
+    except: return None
+
 
 async def update_crypto_market_data():
-    print(f"\n🚀 {datetime.now().strftime('%H:%M:%S')} | بدء جلب بيانات Binance Vision (الرادار الاستخباراتي v8.0)...")
+    print(f"\n🚀 {datetime.now().strftime('%H:%M:%S')} | بدء جلب بيانات Binance Vision (شاملة OBV الاستخباراتي)...")
     
     async with aiohttp.ClientSession() as session:
         try:
-            # استخدام الرابط البديل للـ Ticker أيضاً
             async with session.get("https://data-api.binance.vision/api/v3/ticker/24hr", timeout=10) as res:
-                if res.status != 200:
-                    logging.error(f"❌ فشل الاتصال بـ Ticker API: كود {res.status}")
-                    return
+                if res.status != 200: return
                 ticker_data = await res.json()
                 if not isinstance(ticker_data, list): return
         except Exception as e:
-            logging.error(f"❌ خطأ تقني في الوصول لـ Binance Vision: {e}")
+            logging.error(f"❌ فشل الاتصال بـ API: {e}")
             return
 
         # الفلتر الخاص بك: السعر >= 0.003
@@ -2516,11 +2458,11 @@ async def update_crypto_market_data():
             c for c in ticker_data 
             if isinstance(c, dict) 
             and c.get('symbol', '').endswith('USDT') 
-            and float(c.get('lastPrice', 0)) >= 0.003
+            and float(c.get('lastPrice', 0)) >= 0.001
         ]
         
         # ترتيب حسب أعلى سيولة واختيار أعلى 200 عملة
-        top_coins = sorted(top_coins, key=lambda x: float(x.get('quoteVolume', 0)), reverse=True)[:400]
+        top_coins = sorted(top_coins, key=lambda x: float(x.get('quoteVolume', 0)), reverse=True)[:300]
         
         timeframes = ['5m', '15m', '1h', '2h', '4h', '1d']
         final_records = []
@@ -2528,9 +2470,6 @@ async def update_crypto_market_data():
         for coin in top_coins:
             symbol = coin.get('symbol')
             try:
-                # جلب بيانات العقود الآجلة (النوايا)
-                oi_val, fund_val = await fetch_futures_data_safe(session, symbol)
-                
                 price = float(coin.get('lastPrice', 0))
                 change_percent = float(coin.get('priceChangePercent', 0))
                 
@@ -2542,7 +2481,7 @@ async def update_crypto_market_data():
                     "high_24h": float(coin.get('highPrice', 0)),
                     "low_24h": float(coin.get('lowPrice', 0)),
                     "volume_24h": float(coin.get('volume', 0)),
-                    "change_24h": change_percent,                   
+                    "change_24h": change_percent,
                     "last_tick_direction": "UP" if change_percent >= 0 else "DOWN",
                     "updated_at": "now()"    
                 }
@@ -2552,35 +2491,38 @@ async def update_crypto_market_data():
 
                 for i, tf in enumerate(timeframes):
                     if results[i] and isinstance(results[i], list):
-                        closes = [float(k[4]) for k in results[i]]
+                        # استخراج البيانات المطلوبة للحسابات
                         highs = [float(k[2]) for k in results[i]]
                         lows = [float(k[3]) for k in results[i]]
+                        closes = [float(k[4]) for k in results[i]]
                         volumes = [float(k[5]) for k in results[i]]
                         
-                        # حساب البولنجر (دالتك)
-                        upper_bb, mid_bb, lower_bb = calculate_bollinger(closes)
-                        bbw_value = (upper_bb - lower_bb) / mid_bb if mid_bb > 0 else 0
+                        # حساب بولنجر باندز
+                        upper, mid, lower = calculate_bollinger(closes)
+                        bbw_value = (upper - lower) / mid if mid > 0 else 0
                         
-                        # حساب كيلتنر و ATR (الأسلحة الجديدة)
-                        upper_kc, mid_kc, lower_kc = calculate_keltner_channels(highs, lows, closes)
-                        atr_v = calculate_atr(highs, lows, closes)
-                        
+                        # حساب الـ ATR والـ Keltner Channels (الإضافة الجديدة)
+                        atr_val = calculate_atr(highs, lows, closes)
+                        kc_up, kc_mid, kc_low = calculate_keltner_channels(highs, lows, closes)
+
+                        # حساب الـ OBV
                         obv_val = calculate_obv(closes, volumes)
                         obv_prev_val = calculate_obv(closes[:-1], volumes[:-1]) if len(closes) > 1 else 0.0
 
+                        # تحديث السجل بالبيانات القديمة والجديدة
                         record.update({
                             f"ema_20_{tf}": calculate_ema(closes, 20),
                             f"ema_50_{tf}": calculate_ema(closes, 50),
                             f"ema_100_{tf}": calculate_ema(closes, 100),
                             f"rsi_{tf}": calculate_rsi(closes),
-                            f"bb_upper_{tf}": upper_bb, 
-                            f"bb_middle_{tf}": mid_bb, 
-                            f"bb_lower_{tf}": lower_bb,
+                            f"bb_upper_{tf}": upper, 
+                            f"bb_middle_{tf}": mid, 
+                            f"bb_lower_{tf}": lower,
                             f"bbw_{tf}": bbw_value,
-                            f"kc_upper_{tf}": upper_kc,
-                            f"kc_middle_{tf}": mid_kc,
-                            f"kc_lower_{tf}": lower_kc,
-                            f"atr_{tf}": atr_v,
+                            f"atr_{tf}": atr_val,             # إضافة ATR
+                            f"kc_upper_{tf}": kc_up,          # إضافة KC Upper
+                            f"kc_middle_{tf}": kc_mid,        # إضافة KC Middle
+                            f"kc_lower_{tf}": kc_low,         # إضافة KC Lower
                             f"volume_{tf}": float(volumes[-1]),
                             f"volume_ma_{tf}": sum(volumes[-20:]) / 20,
                             f"obv_{tf}": obv_val,
@@ -2594,11 +2536,12 @@ async def update_crypto_market_data():
                 continue
 
         if final_records:
-            print(f"📦 جاري رفع {len(final_records)} عملة مع بيانات 'الرصد الاستخباراتي' كاملة...")
+            print(f"📦 جاري رفع {len(final_records)} عملة مع بيانات 'الجندي المجهول' كاملة...")
             for i in range(0, len(final_records), 10):
                 await async_manual_upsert("crypto_market_simulation", final_records[i:i + 10])
     
     print(f"✅ {datetime.now().strftime('%H:%M:%S')} | تم التحديث والحقن بنجاح.")
+    
 
 
 async def unified_trading_system():
@@ -2608,7 +2551,7 @@ async def unified_trading_system():
             # أولاً: المصنع يشتغل ويحدث كل الفريمات والجندي المجهول
             await update_crypto_market_data()
             print("✅ المصنع أكمل الحقن بنجاح. انتظار 60 ثانية للرادار...")
-            await asyncio.sleep(60)
+            await asyncio.sleep(120)
 
             # ثانياً: المصنع ينادي الرادار (تعال شف شغلك)
             print("📡 نداء للرادار: البيانات جاهزة في سوبابيس، ابدأ المسح...")
@@ -2616,7 +2559,7 @@ async def unified_trading_system():
             
             # ثالثاً: الرادار يخلص وينتظر دقيقة قبل الجولة الجديدة للمصنع
             print("⏳ جولة كاملة تمت. استراحة 60 ثانية قبل التحديث القادم...")
-            await asyncio.sleep(120)
+            await asyncio.sleep(30)
             
         except Exception as e:
             logging.error(f"⚠️ خطأ في النظام الموحد: {e}")
