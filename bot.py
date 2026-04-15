@@ -2455,7 +2455,7 @@ def calculate_bbw(upper, lower, middle):
         
 # --- [ 3. دالة الجلب والتحليل ] ---
 # --- [ 3. دالة الجلب والتحليل المحدثة v8.0 ] ---
-async def fetch_futures_data_safe(session, symbol):
+async def fetch_futures_data_11safe(session, symbol):
     # نستخدم fapi.binance.com ولكن سنضيف منطقاً للتأكد من استلام البيانات
     oi_url = f"https://fapi.binance.com/fapi/v1/openInterest?symbol={symbol}"
     fund_url = f"https://fapi.binance.com/fapi/v1/premiumIndex?symbol={symbol}"
@@ -2481,7 +2481,7 @@ async def fetch_futures_data_safe(session, symbol):
     
     return oi_val, fund_val
     
-async def fetch_klines(session, symbol, interval, limit=100):
+async def fetch11_klines(session, symbol, interval, limit=100):
     # استخدام رابط الـ Vision لتجنب حظر سيرفر راندر
     url = f"https://data-api.binance.vision/api/v3/klines?symbol={symbol}&interval={interval}&limit={limit}"
     try:
@@ -2495,7 +2495,7 @@ async def fetch_klines(session, symbol, interval, limit=100):
         logging.error(f"❌ خطأ اتصال (Vision API) لـ {symbol}: {e}")
         return None
 
-async def update_crypto_market_data():
+async def update_crypto_market_11data():
     print(f"\n🚀 {datetime.now().strftime('%H:%M:%S')} | بدء جلب بيانات Binance Vision (الرادار الاستخباراتي v8.0)...")
     
     async with aiohttp.ClientSession() as session:
@@ -2603,7 +2603,7 @@ async def update_crypto_market_data():
     print(f"✅ {datetime.now().strftime('%H:%M:%S')} | تم التحديث والحقن بنجاح.")
 
 
-async def unified_trading_system():
+async def unified_trading_11system():
     """هذه الدالة هي المايسترو: تحديث البيانات -> انتظار دقيقة -> تحليل الرادار"""
     while True:
         try:
