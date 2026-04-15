@@ -225,36 +225,41 @@ async def intelligence_scanner():
             reasons = []
 
             # ==========================================
-            # 🛠️ [ 1. استخراج ترسانة البيانات ]
+            # 🛠️ [ 1. استخراج ترسانة البيانات - النسخة المحصنة ]
             # ==========================================
-            price = float(coin.get('current_price', 0))
+            # ملاحظة: نستخدم (or) بدلاً من الفاصلة لضمان استبدال الـ NULL بصفر
+            price = float(coin.get('current_price') or 0)
             
-            # مؤشرات 15 دقيقة (المعركة الحالية)
-            bb_upper = float(coin.get('bb_upper_15m', 0))
-            bb_lower = float(coin.get('bb_lower_15m', 0))
-            bb_mid = float(coin.get('bb_middle_15m', 1))
+            # مؤشرات 15 دقيقة
+            bb_upper = float(coin.get('bb_upper_15m') or 0)
+            bb_lower = float(coin.get('bb_lower_15m') or 0)
+            bb_mid = float(coin.get('bb_middle_15m') or 1)
             
-            kc_upper = float(coin.get('kc_upper_15m', 0))
-            kc_lower = float(coin.get('kc_lower_15m', 0))
+            kc_upper = float(coin.get('kc_upper_15m') or 0)
+            kc_lower = float(coin.get('kc_lower_15m') or 0)
             
-            rsi_15m = float(coin.get('rsi_15m', 50))
-            vol_15m = float(coin.get('volume_15m', 0))
-            vol_ma_15m = float(coin.get('volume_ma_15m', 1))
-            obv_slope = float(coin.get('obv_slope_15m', 0))
+            rsi_15m = float(coin.get('rsi_15m') or 50)
+            vol_15m = float(coin.get('volume_15m') or 0)
+            vol_ma_15m = float(coin.get('volume_ma_15m') or 1)
+            obv_slope = float(coin.get('obv_slope_15m') or 0)
             
-            bbw_15m = float(coin.get('bbw_15m', 0))
-            bbw_prev_15m = float(coin.get('bbw_prev_15m', 0))
+            bbw_15m = float(coin.get('bbw_15m') or 0)
+            bbw_prev_15m = float(coin.get('bbw_prev_15m') or 0)
             expansion_ratio_15m = (bbw_15m / bbw_prev_15m) if bbw_prev_15m > 0 else 1.0
 
-            # بيانات العقود الآجلة (الحطب والشرارة)
-            oi_change = float(coin.get('open_interest_change_24h', 0))
-            funding_rate = float(coin.get('funding_rate', 0))
+            # بيانات العقود الآجلة
+            oi_change = float(coin.get('open_interest_change_24h') or 0)
+            funding_rate = float(coin.get('funding_rate') or 0)
 
-            # بيانات الفريمات الكبيرة (الرصد من خلفه)
-            ema20_4h = float(coin.get('ema_20_4h', 0))
-            ema50_4h = float(coin.get('ema_50_4h', 0))
-            rsi_4h = float(coin.get('rsi_4h', 50))
-
+            # بيانات الفريمات الكبيرة
+            ema20_4h = float(coin.get('ema_20_4h') or 0)
+            ema50_4h = float(coin.get('ema_50_4h') or 0)
+            rsi_4h = float(coin.get('rsi_4h') or 50)
+            
+            # بيانات الـ 24 ساعة
+            high_24h = float(coin.get('high_24h') or (price * 1.05))
+            low_24h = float(coin.get('low_24h') or (price * 0.95))
+            
             # ==========================================
             # 🔥 [ 2. المحرك الاستخباراتي: القنابل الموقوتة ]
             # ==========================================
