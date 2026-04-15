@@ -2559,7 +2559,7 @@ async def unified_trading_system():
             
             # ثالثاً: الرادار يخلص وينتظر دقيقة قبل الجولة الجديدة للمصنع
             print("⏳ جولة كاملة تمت. استراحة 60 ثانية قبل التحديث القادم...")
-            await asyncio.sleep(30)
+            await asyncio.sleep(60)
             
         except Exception as e:
             logging.error(f"⚠️ خطأ في النظام الموحد: {e}")
@@ -2618,7 +2618,7 @@ async def watch_dog(task_func, *args):
         except Exception as e:
             logging.error(f"🚨 انهيار في {task_func.__name__}: {e}")
             logging.info("♻️ إعادة التشغيل التلقائي الآن...")
-            await asyncio.sleep(5) # انتظار بسيط لتجنب التكرار السريع عند الخطأ
+            await asyncio.sleep(10) # انتظار بسيط لتجنب التكرار السريع عند الخطأ
 
 async def main_startup():
     # أ) إعداد سيرفر الويب للبقاء Online
