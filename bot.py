@@ -2520,7 +2520,7 @@ async def update_crypto_market_data():
         ]
         
         # ترتيب حسب أعلى سيولة واختيار أعلى 200 عملة
-        top_coins = sorted(top_coins, key=lambda x: float(x.get('quoteVolume', 0)), reverse=True)[:200]
+        top_coins = sorted(top_coins, key=lambda x: float(x.get('quoteVolume', 0)), reverse=True)[:400]
         
         timeframes = ['5m', '15m', '1h', '2h', '4h', '1d']
         final_records = []
@@ -2542,9 +2542,7 @@ async def update_crypto_market_data():
                     "high_24h": float(coin.get('highPrice', 0)),
                     "low_24h": float(coin.get('lowPrice', 0)),
                     "volume_24h": float(coin.get('volume', 0)),
-                    "change_24h": change_percent,
-                    "open_interest": oi_val,
-                    "funding_rate": fund_val,
+                    "change_24h": change_percent,                   
                     "last_tick_direction": "UP" if change_percent >= 0 else "DOWN",
                     "updated_at": "now()"    
                 }
