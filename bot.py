@@ -206,13 +206,12 @@ async def trade_reaper():
         await asyncio.sleep(8) # وقت مثالي لضمان تحديث سريع وحماية من الحظر
 
         
-
 async def intelligence_scanner():
     """
-    الرادار الاستخباراتي v7.0 (إعصار BBW الاستخباراتي)
-    تم تصميمه ليكون "لعنة" على التذبذب الوهمي وصائداً مؤكداً للانفجارات السعرية.
+    الرادار النووي v8.0 (عين الصقر الاستخباراتية)
+    يدمج: قنوات كيلتنر (TTM Squeeze)، بيانات العقود (OI & Funding)، ومصائد السيولة.
     """
-    print(f"🚀 {datetime.now().strftime('%H:%M:%S')} | الرادار الخارق v7.0 يمسح السوق بأشعة البولنجر والسيولة...")
+    print(f"☢️ {datetime.now().strftime('%H:%M:%S')} | الرادار الخارق v8.0 يبدأ المسح النووي للسوق...")
     
     try:
         res = supabase.table("crypto_market_simulation").select("*").execute()
@@ -225,107 +224,101 @@ async def intelligence_scanner():
             score = 0
             reasons = []
 
-            # 🛠️ البيانات الحيوية
+            # ==========================================
+            # 🛠️ [ 1. استخراج ترسانة البيانات ]
+            # ==========================================
             price = float(coin.get('current_price', 0))
             
-            # خطوط البولنجر (الأصفر والأبيض)
-            upper = float(coin.get('bb_upper_15m', 0))
-            lower = float(coin.get('bb_lower_15m', 0))
-            middle = float(coin.get('bb_middle_15m', 1))
+            # مؤشرات 15 دقيقة (المعركة الحالية)
+            bb_upper = float(coin.get('bb_upper_15m', 0))
+            bb_lower = float(coin.get('bb_lower_15m', 0))
+            bb_mid = float(coin.get('bb_middle_15m', 1))
             
-            # RSI (مبني على إعداداتك: القاع تحت 25 يقترب من منطقة الـ 22 الذهبية)
+            kc_upper = float(coin.get('kc_upper_15m', 0))
+            kc_lower = float(coin.get('kc_lower_15m', 0))
+            
             rsi_15m = float(coin.get('rsi_15m', 50))
-            
-            # المتوسطات المتحركة (الأحمر، الأخضر، الأزرق)
-            ema20 = float(coin.get('ema_20_15m', 0))
-            ema50 = float(coin.get('ema_50_15m', 0))
-            ema100 = float(coin.get('ema_100_15m', 0))
-            
             vol_15m = float(coin.get('volume_15m', 0))
             vol_ma_15m = float(coin.get('volume_ma_15m', 1))
-
-            obv_slope_15m = float(coin.get('obv_slope_15m', 0))
+            obv_slope = float(coin.get('obv_slope_15m', 0))
             
-            # --- [ 👁️ استخبارات عرض القناة BBW (السر العظيم) ] ---
             bbw_15m = float(coin.get('bbw_15m', 0))
             bbw_prev_15m = float(coin.get('bbw_prev_15m', 0))
-            
-            # نسبة التوسع: إذا كانت > 1.10 يعني أن "فم التمساح" فتح بقوة 10%
             expansion_ratio_15m = (bbw_15m / bbw_prev_15m) if bbw_prev_15m > 0 else 1.0
 
-            bbw_5m = float(coin.get('bbw_5m', 0))
-            bbw_prev_5m = float(coin.get('bbw_prev_5m', 0))
-            expansion_ratio_5m = (bbw_5m / bbw_prev_5m) if bbw_prev_5m > 0 else 1.0
+            # بيانات العقود الآجلة (الحطب والشرارة)
+            oi_change = float(coin.get('open_interest_change_24h', 0))
+            funding_rate = float(coin.get('funding_rate', 0))
+
+            # بيانات الفريمات الكبيرة (الرصد من خلفه)
+            ema20_4h = float(coin.get('ema_20_4h', 0))
+            ema50_4h = float(coin.get('ema_50_4h', 0))
+            rsi_4h = float(coin.get('rsi_4h', 50))
 
             # ==========================================
-            # 🔥 [ المحرك الاستخباراتي v7.0: القنابل الموقوتة ]
+            # 🔥 [ 2. المحرك الاستخباراتي: القنابل الموقوتة ]
             # ==========================================
 
-            # 💣 النموذج الأول: "زحف الإعصار" (Band Walk + Expansion) [130 نقطة]
-            # الشروط: سعر فوق الأحمر + يلامس الأصفر العلوي + ترتيب هجومي + القناة تنفجر
-            is_crawling_up = (
-                (price >= ema20) and 
-                (price >= upper * 0.995) and
-                (ema20 > middle) and
-                (ema20 > ema50 > ema100) and
-                (expansion_ratio_15m > 1.10) # 👈 الفلتر القاتل: القناة تنفجر الآن
-            )
+            # 💣 النموذج الأول: "انضغاط TTM Squeeze" (هدوء البحر قبل العاصفة) [150 نقطة]
+            # الشروط: خطوط البولنجر دخلت بالكامل داخل قنوات كيلتنر (اختناق) + سيولة صامتة تدخل
+            is_squeeze_on = (bb_upper < kc_upper) and (bb_lower > kc_lower)
+            is_squeeze_firing = (not is_squeeze_on) and (expansion_ratio_15m > 1.05) and (obv_slope > 0)
+
+            if is_squeeze_firing and oi_change > 5:
+                score += 150
+                reasons.append(f"🌋 انفجار الانضغاط (Squeeze Fire): البولنجر يكسر كيلتنر مع دخول سيولة قوية (OI: +{oi_change}%)")
+            elif is_squeeze_on:
+                # نضعها تحت المراقبة الصامتة ولا ندخل
+                reasons.append("🤫 هدوء البحر: العملة في حالة انضغاط خانق داخل كيلتنر، ننتظر الانفجار.")
+
+            # 💣 النموذج الثاني: "Short Squeeze" (إبادة البائعين) [140 نقطة]
+            # الشروط: الفاندنج سالب جداً (البائعين مسيطرين) + السعر يرفض النزول + RSI يقترب من خط الـ 22
+            is_short_squeeze = (funding_rate < -0.01) and (price >= bb_lower) and (rsi_15m <= 25)
             
-            if is_crawling_up:
+            if is_short_squeeze and obv_slope > 0:
+                score += 140
+                reasons.append(f"🩸 إبادة البائعين: التمويل سالب جداً ({funding_rate}%) والسعر يصنع قاعاً مع RSI ({rsi_15m:.1f})")
+
+            # 💣 النموذج الثالث: "مصيدة السيولة" (Liquidity Sweep) [130 نقطة]
+            # الشروط: السعر الحالي فوق البولنجر السفلي ولكن الفوليوم انفجر فجأة (ابتلاع ذيل الشمعة)
+            is_liquidity_sweep = (price > bb_lower) and (vol_15m > vol_ma_15m * 2.5) and (rsi_15m < 25)
+            
+            if is_liquidity_sweep:
                 score += 130
-                reasons.append(f"🚀 زحف الإعصار: السعر يركب الخط العلوي بقوة هجومية مع توسع ({expansion_ratio_15m:.1%})")
-
-            # 💣 النموذج الثاني: "مصيدة الحيتان / قنص القاع" [120 نقطة]
-            # الشروط: ملامسة السفلي + RSI متشبع بيعياً + الحيتان تشتري سراً + بداية فتح القناة للارتداد
-            is_reverse_pump = (
-                (price <= lower * 1.005) and
-                (rsi_15m < 25) and # قريبة جداً من خط الـ 22 الخاص بك
-                (obv_slope_15m > 0) and
-                (expansion_ratio_15m > 1.05) # 👈 القناة تبدأ بالفتح للارتداد
-            )
-            
-            if is_reverse_pump:
-                score += 120
-                reasons.append(f"🎯 قنص القاع: زحف سفلي مع دخول سيولة صامتة (RSI: {rsi_15m:.1f}) وبداية توسع")
+                reasons.append(f"🪤 مصيدة السيولة: الحيتان ضربوا الستوب لوز واشتروا الكميات بقوة (الفوليوم: {vol_15m})")
 
             # ==========================================
-            # ⚡ [ معززات الزخم الاستخباراتية (Boosters) ]
+            # ⚡ [ 3. التأكيد الفني الصارم (Strict Confirmation) ]
             # ==========================================
             
-            # 1. شرارة الـ 5 دقائق (رصد مبكر جداً)
-            if expansion_ratio_5m > 1.20:
-                score += 30
-                reasons.append(f"🔥 شرارة الانفجار: توسع عنيف جداً في فريم 5m ({expansion_ratio_5m:.1%})")
-
-            # 2. كسر الاختناق التاريخي (Squeeze Release)
-            is_squeezed_now = (bbw_15m < 0.025)
-            if is_squeezed_now and expansion_ratio_15m > 1.05:
+            # التأكيد من الفريم الأكبر (4 ساعات) - حماية الظهر
+            is_4h_bullish = (ema20_4h > ema50_4h) and (rsi_4h > 50)
+            if is_4h_bullish and score > 0:
                 score += 40
-                reasons.append("🌋 كسر الضغط: خروج عنيف من مرحلة اختناق شديدة")
+                reasons.append("🛡️ غطاء جوي (4H): الاتجاه العام صاعد ويدعم الانفجار القادم")
 
-            # 3. سيولة جنونية
-            if vol_ma_15m > 0 and vol_15m > (vol_ma_15m * 2):
-                score += 30
-                reasons.append("📊 فوليوم مضاعف: السيولة الحالية تتجاوز 200% من المتوسط")
+            # تراكم الحطب (Open Interest Accumulation)
+            if oi_change > 15 and bbw_15m < 0.05:
+                score += 50
+                reasons.append(f"🪵 تكديس الحطب: السعر ميت ولكن الاهتمام المفتوح يرتفع بجنون (+{oi_change}%)")
 
             # ==========================================
-            # 🛡️ [ فلاتر الحماية الصارمة (لعنة على التلاعب) ]
+            # 🚫 [ 4. فلاتر الحماية الصارمة ]
             # ==========================================
             
-            # صعود بدون سيولة، أو صعود والقناة تضيق = فخ حيتان (صعود كاذب لتصريف الكميات)
-            if price > upper and (obv_slope_15m < 0 or expansion_ratio_15m < 0.95):
-                score -= 100 # عقاب شديد يطرد العملة من الرادار فوراً
-                reasons.append("⚠️ فخ الحيتان: صعود كاذب للتصريف (خروج سيولة أو القناة تضيق)")
+            # إذا كان الفريم الأكبر هابط بقوة، نلغي أي إشارة شراء مهما كانت قوية (نحن نقنص ولا نغامر)
+            if rsi_4h < 40 and ema20_4h < ema50_4h:
+                score -= 100
+                reasons.append("⚠️ الفريم الأكبر (4H) منهار، تم إبطال الهجوم لمنع التعلق.")
 
             # ==========================================
 
-            high_24h = float(coin.get('high_24h', 0))
-            low_24h = float(coin.get('low_24h', 0))
+            high_24h = float(coin.get('high_24h', price * 1.05))
+            low_24h = float(coin.get('low_24h', price * 0.95))
             fib_618 = high_24h - (0.618 * (high_24h - low_24h))
 
-            # 🚀 إرسال الإنذار الذهبي للعملات التي اجتازت الاختبار
-            # رفعنا العتبة إلى 120 لضمان أن العملة حققت شرطاً رئيسياً (زحف أو قاع) مع تأكيد واحد على الأقل
-            if score >= 120: 
+            # 🚀 إرسال الإنذار للعملات التي اجتازت جدار الحماية (درجة التأكيد الصارمة: 150)
+            if score >= 150: 
                 supabase.table("market_intelligence").upsert({
                     "symbol": symbol,
                     "current_price": price,
@@ -333,21 +326,21 @@ async def intelligence_scanner():
                     "volume_24h": vol_15m,
                     "rsi_value": rsi_15m,
                     "pump_score": int(score), 
-                    "global_obv_status": "BAND_WALK" if is_crawling_up else ("BOTTOM_REVERSAL" if is_reverse_pump else "BUILDING_MOMENTUM"),
-                    "multi_frame_liquidity_score": obv_slope_15m,
-                    "is_squeezed": is_squeezed_now,
+                    "global_obv_status": "SQUEEZE_FIRE" if is_squeeze_firing else "LIQUIDITY_SWEEP",
+                    "multi_frame_liquidity_score": obv_slope,
+                    "is_squeezed": is_squeeze_on,
                     "fib_golden_ratio": fib_618,
-                    "trend_status": "EXPLODING",
+                    "trend_status": "NUCLEAR_EXPLOSION",
                     "last_updated": "now()"
                 }).execute()
 
                 await trigger_golden_signal(symbol, score, reasons, fib_618, price)
                 
     except Exception as e:
-        logging.error(f"❌ خطأ داخلي في الرادار القناص: {e}")
+        logging.error(f"❌ خطأ داخلي في مفاعل الرادار: {e}")
 
-    print("✅ تم الانتهاء من المسح الاستخباراتي (v7.0). لا مجال للهروب.")
-    
+    print("✅ تم الانتهاء من المسح النووي (v8.0). السوق الآن مكشوف بالكامل.")
+   
 # تحديث دالة التنبيه لتقبل السعر الحالي
 async def trigger_golden_signal(symbol, score, reasons, fib_618, price):
     text = (
