@@ -1257,7 +1257,7 @@ async def category_handler(call: types.CallbackQuery):
     for coin in filtered_coins:
         symbol = coin['symbol']
         # نحفظ القسم القديم في الكول باك لنتمكن من الرجوع إليه
-        buttons.append(InlineKeyboardButton(f"🪙 {symbol}", callback_data=f"coin_{symbol}_{category}"))
+        buttons.append(InlineKeyboardButton(f"🪙 {symbol}", callback_data=f"coo_{symbol}_{category}"))
     
     keyboard.add(*buttons) # إضافة الأزرار صفين صفين
     keyboard.add(InlineKeyboardButton("🔙 رجوع للقائمة الرئيسية", callback_data="back_to_main"))
