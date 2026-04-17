@@ -1271,7 +1271,7 @@ async def category_handler(call: types.CallbackQuery):
 # ==========================================
 # 🪙 4. مستمع عرض قالب العملة المختار
 # ==========================================
-@dp.callback_query_handler(Text(startswith="coin_"), state="*")
+@dp.callback_query_handler(Text(startswith="coo_"), state="*")
 async def coin_detail_handler(call: types.CallbackQuery):
     # تفكيك الكول باك (مثال: coin_ORDIUSDT_cat_vip)
     parts = call.data.split("_")
