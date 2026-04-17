@@ -316,16 +316,22 @@ async def intelligence_scanner():
                 reasons.append("⚠️ فخ الحيتان: صعود كاذب للتصريف (خروج سيولة أو القناة تضيق)")
 
             # ==========================================
-            # 🎯 [ قرار الإطلاق النهائي ]
+            # 🎯 [ قرار الإطلاق النهائي وتحديث الاستخبارات ]
             # ==========================================
             high_24h = float(coin.get('high_24h') or (price * 1.05))
             low_24h = float(coin.get('low_24h') or (price * 0.95))
             fib_618 = high_24h - (0.618 * (high_24h - low_24h))
 
-            # إطلاق الإنذار الذهبي إذا توافقت الثلاثية (الزحف + الشرارة + الفوليوم = 130 نقطة كحد أدنى)
-            # رفعنا العتبة إلى 150 لضمان وجود الثلاثية + مؤشر إضافي (كيلتنر أو عقود) ليكون الانفجار نووياً
+            # تجهيز قيم الأسرار المرصودة كأرقام (1 للمتحقق، 0 لغير المتحقق)
+            sc_crawling = 1 if is_crawling_up else 0
+            sc_spark = 1 if is_5m_spark else 0
+            sc_volume = 1 if is_volume_spike else 0
+            sc_keltner = 1 if (upper > kc_upper and expansion_ratio_15m > 1.05) else 0
+            sc_whale = 1 if (oi_change > 5 and is_crawling_up) else 0
+
+            # إطلاق الإنذار الذهبي إذا توافقت الثلاثية (الزحف + الشرارة + الفوليوم)
             if is_crawling_up and is_5m_spark and is_volume_spike:
-                score += 60 # مكافأة "التطابق المثالي" لضمان إرسال الإشعار كـ 190/100
+                score += 60  # مكافأة "التطابق المثالي" لرفع السكور إلى القمة 190/100
                 
             if score >= 150: 
                 supabase.table("market_intelligence").upsert({
@@ -337,19 +343,27 @@ async def intelligence_scanner():
                     "pump_score": int(score), 
                     "global_obv_status": "MOMENTUM_EXPLOSION",
                     "multi_frame_liquidity_score": obv_slope_15m,
-                    "is_squeezed": False, # لقد تحرر بالفعل!
+                    "is_squeezed": False, # لقد تحرر بالفعل من الانضغاط
                     "fib_golden_ratio": fib_618,
                     "trend_status": "NUCLEAR_EXPLOSION",
+                    # رفع أرقام الأسرار للأعمدة الجديدة
+                    "score_crawling": sc_crawling,
+                    "score_spark": sc_spark,
+                    "score_volume": sc_volume,
+                    "score_keltner": sc_keltner,
+                    "score_whale": sc_whale,
                     "last_updated": "now()"
                 }).execute()
 
+                # إرسال الإشعار الفوري (تأكد من تمرير الأسباب للبوت)
                 await trigger_golden_signal(symbol, score, reasons, fib_618, price)
                 
     except Exception as e:
+        import logging
         logging.error(f"❌ خطأ داخلي في الرادار القناص v9.0: {e}")
 
-    print("✅ تم الانتهاء من مسح الزخم المتفجر (v9.0).")
-
+    print("✅ تم الانتهاء من مسح الزخم المتفجر (v9.0) ورفع البيانات الاستخباراتية.")
+    
 
 # تحديث دالة التنبيه لتقبل السعر الحالي
 async def trigger_golden_signal(symbol, score, reasons, fib_618, price):
@@ -388,6 +402,57 @@ async def trigger_golden_signal(symbol, score, reasons, fib_618, price):
         clean_text = text.replace("<b>", "").replace("</b>", "").replace("<code>", "").replace("</code>", "").replace("<i>", "").replace("</i>", "")
         await bot.send_message(chat_id=ADMIN_ID, text=f"⚠️ خطأ في التنسيق، إليك البيانات الخام:\n\n{clean_text}")
         
+# ==========================================
+# 🛠️ 1. دوال القوالب (صناعة القالب بناءً على الأعمدة)
+# ==========================================
+def build_coin_template(coin):
+    """دالة تبني القالب الاستخباراتي بدقة بناءً على الأرقام المرفوعة من الرادار"""
+    symbol = coin.get('symbol', 'UNKNOWN')
+    price = coin.get('current_price', 0)
+    total_score = coin.get('pump_score', 0)
+    fib_618 = coin.get('fib_golden_ratio', 0)
+    
+    # قراءة أرقام الأسرار من الأعمدة الجديدة
+    sc_crawling = coin.get('score_crawling', 0)
+    sc_spark = coin.get('score_spark', 0)
+    sc_volume = coin.get('score_volume', 0)
+    sc_keltner = coin.get('score_keltner', 0)
+    sc_whale = coin.get('score_whale', 0)
+    is_squeezed = coin.get('is_squeezed', False)
+
+    reasons = ""
+    if sc_crawling > 0:
+        reasons += f"- 🚀 زحف الإعصار: السعر يركب الخط العلوي بقوة هجومية.\n"
+    if sc_spark > 0:
+        reasons += f"- 🔥 شرارة الانفجار: توسع عنيف جداً في فريم 5m.\n"
+    if sc_volume > 0:
+        reasons += f"- 📊 فوليوم مضاعف: السيولة الحالية تتجاوز 200% من المتوسط.\n"
+    if sc_keltner > 0:
+        reasons += f"- 🌋 انفجار الانضغاط: البولنجر يكسر كيلتنر مع دخول سيولة.\n"
+    if sc_whale > 0:
+        reasons += f"- 🐳 وقود الحيتان: الاهتمام المفتوح يرتفع بالتزامن مع الصعود.\n"
+    if is_squeezed:
+        reasons += f"- 🤫 هدوء البحر: العملة في حالة انضغاط خانق (تجميع سيولة).\n"
+        
+    if not reasons:
+         reasons = "- ⚡ رصد إيجابي: العملة في مسار صاعد وتجمع زخماً.\n"
+
+    # تجميع القالب النهائي
+    template = (
+        f"🚨 **إشعار مهم: فرصة ذهبية!** 🚨\n\n"
+        f"🪙 **العملة:** #{symbol}\n"
+        f"💵 **السعر لحظة الرصد:** {price}\n"
+        f"🔥 **درجة الانفجار:** {total_score}/100 🟢\n"
+        f"━━━━━━━━━━━━━━━━━━\n"
+        f"🕵️‍♂️ **الأسرار المرصودة:**\n"
+        f"{reasons}"
+        f"━━━━━━━━━━━━━━━━━━\n"
+        f"📐 **المستويات الفنية:**\n"
+        f"👈 النسبة الذهبية (0.618): {fib_618:.4f}\n\n"
+        f"⚠️ هذه البيانات سرية ومرسلة لك فقط."
+    )
+    return template
+
 # ==========================================
 # 1. الدوال الحسابية الأساسية (Math Core)
 # ==========================================
@@ -555,7 +620,6 @@ async def get_active_trades_report(user_id):
         logging.error(f"Error in trade report: {e}")
         return None, "❌ حدث خطأ أثناء جلب التقرير."
         
-
 # --- دالة حساب السعر المستهدف (دعم الكسور العشرية) ---
 def calc_price(base_price, roe_pct, is_tp, side, lev):
     """
@@ -575,7 +639,6 @@ def calc_price(base_price, roe_pct, is_tp, side, lev):
     # نرجع السعر بـ 6 أرقام عشرية لضمان الدقة في كل العملات
     return round(target, 6)
     
-        # --- توليد واجهة الإعدادات ---
 # ==========================================
 # --- [ توليد واجهة الإعدادات المطورة ] ---
 # ==========================================
@@ -986,24 +1049,7 @@ class BankTransfer(StatesGroup):
     waiting_for_account = State()     # انتظار رقم الحساب (في حال التحويل لشخص)
 # ==========================================
 # 4. مستمعات المحفظة (متوافق مع Trade_ID)
-# ==========================================
-# --- 🛰️ مستمع الرسائل الصامت (Silent Listener) ---
-@dp.message_handler(lambda message: message.text in ADMIN_COMMANDS, state="*")
-async def admin_silent_listener(message: types.Message):
-    # 🕵️‍♂️ فحص الهوية بالخفاء (بدون رد فعل إذا كان المستخدم غريباً)
-    if message.from_user.id != ADMIN_ID:
-        return # صمت تام.. البوت يتجاهل الأمر تماماً
-
-    # إذا كنت أنت (أثر)، يتم التنفيذ فوراً
-    report_text, markup = await get_intelligence_report_text()
-    
-    await message.reply(
-        report_text, 
-        reply_markup=markup, 
-        parse_mode="HTML"
-    )
-
-         
+# ==========================================         
 @dp.message_handler(Text(equals=["محفظتي", "المحفظة"], ignore_case=True), state="*")
 async def message_wallet_view(message: types.Message):
     await process_wallet_logic(message.from_user.id, message.from_user.first_name, message=message)
@@ -1150,7 +1196,124 @@ async def listener_trades(message: types.Message):
         logging.error(f"Listener Error: {e}")
         await message.answer(f"⚠️ عذراً، حدث خطأ أثناء جلب صفقاتك: {e}")
 
+# ==========================================
+# 🎛️ 2. المستمع الرئيسي (صفقات اليوم، فلب، ترند)
+# ==========================================
+@dp.message_handler(Text(equals=["صفقات اليوم", "فلب", "ترند"], ignore_case=True), state="*")
+async def main_deals_menu(message: types.Message):
+    text = "☢️ **غرفة العمليات الاستخباراتية**\n\nاختر نوع الصفقات المرصودة من الرادار v9.0:"
+    
+    keyboard = InlineKeyboardMarkup(row_width=1)
+    keyboard.add(
+        InlineKeyboardButton("🔥 صفقات VIP (الانفجار النووي)", callback_data="cat_vip"),
+        InlineKeyboardButton("⚡ صفقات متوسطة (زخم تصاعدي)", callback_data="cat_mid"),
+        InlineKeyboardButton("🤫 صفقات تجميع (انضغاط السيولة)", callback_data="cat_squeeze")
+    )
+    
+    await message.reply(text, reply_markup=keyboard)
 
+
+# ==========================================
+# 🗂️ 3. مستمع تصنيفات الصفقات (الأقسام)
+# ==========================================
+@dp.callback_query_handler(Text(startswith="cat_"), state="*")
+async def category_handler(call: types.CallbackQuery):
+    category = call.data
+    
+    # جلب البيانات من سوبابيس
+    res = supabase.table("market_intelligence").select("*").execute()
+    coins = res.data
+    
+    if not coins:
+        await call.answer("⚠️ لا توجد صفقات مرصودة حالياً!", show_alert=True)
+        return
+
+    filtered_coins = []
+    category_title = ""
+
+    # تصنيف ذكي للعملات
+    for coin in coins:
+        score = coin.get('pump_score', 0)
+        is_squeezed = coin.get('is_squeezed', False)
+        
+        if category == "cat_vip" and score >= 180:
+            filtered_coins.append(coin)
+            category_title = "🔥 صفقات VIP"
+        elif category == "cat_mid" and 130 <= score < 180:
+            filtered_coins.append(coin)
+            category_title = "⚡ صفقات متوسطة الزخم"
+        elif category == "cat_squeeze" and is_squeezed:
+            filtered_coins.append(coin)
+            category_title = "🤫 صفقات تجميع السيولة"
+
+    if not filtered_coins:
+        await call.answer("⚠️ الرادار لم يرصد عملات في هذا القسم حالياً.", show_alert=True)
+        return
+
+    keyboard = InlineKeyboardMarkup(row_width=2)
+    buttons = []
+    
+    # صناعة أزرار العملات بديناميكية
+    for coin in filtered_coins:
+        symbol = coin['symbol']
+        # نحفظ القسم القديم في الكول باك لنتمكن من الرجوع إليه
+        buttons.append(InlineKeyboardButton(f"🪙 {symbol}", callback_data=f"coin_{symbol}_{category}"))
+    
+    keyboard.add(*buttons) # إضافة الأزرار صفين صفين
+    keyboard.add(InlineKeyboardButton("🔙 رجوع للقائمة الرئيسية", callback_data="back_to_main"))
+    
+    await call.message.edit_text(
+        f"📊 **{category_title}**\n\nاختر العملة لعرض التحليل الاستخباري:",
+        reply_markup=keyboard
+    )
+
+
+# ==========================================
+# 🪙 4. مستمع عرض قالب العملة المختار
+# ==========================================
+@dp.callback_query_handler(Text(startswith="coin_"), state="*")
+async def coin_detail_handler(call: types.CallbackQuery):
+    # تفكيك الكول باك (مثال: coin_ORDIUSDT_cat_vip)
+    parts = call.data.split("_")
+    symbol = parts[1]
+    prev_category = f"{parts[2]}_{parts[3]}" 
+    
+    # جلب بيانات العملة المحددة من سوبابيس
+    res = supabase.table("market_intelligence").select("*").eq("symbol", symbol).execute()
+    coin_data = res.data
+    
+    if not coin_data:
+        await call.answer("⚠️ حدث خطأ: لا توجد بيانات لهذه العملة.", show_alert=True)
+        return
+        
+    coin = coin_data[0]
+    
+    # بناء القالب باستخدام الدالة المخصصة
+    template = build_coin_template(coin)
+    
+    # زر الرجوع للقسم المحدد
+    keyboard = InlineKeyboardMarkup()
+    keyboard.add(InlineKeyboardButton("🔙 رجوع للقائمة السابقة", callback_data=prev_category))
+    
+    await call.message.edit_text(template, reply_markup=keyboard, parse_mode="Markdown")
+
+
+# ==========================================
+# 🔙 5. مستمع الرجوع للقائمة الرئيسية
+# ==========================================
+@dp.callback_query_handler(Text(equals="back_to_main"), state="*")
+async def back_to_main_handler(call: types.CallbackQuery):
+    text = "☢️ **غرفة العمليات الاستخباراتية**\n\nاختر نوع الصفقات المرصودة من الرادار v9.0:"
+    
+    keyboard = InlineKeyboardMarkup(row_width=1)
+    keyboard.add(
+        InlineKeyboardButton("🔥 صفقات VIP (الانفجار النووي)", callback_data="cat_vip"),
+        InlineKeyboardButton("⚡ صفقات متوسطة (زخم تصاعدي)", callback_data="cat_mid"),
+        InlineKeyboardButton("🤫 صفقات تجميع (انضغاط السيولة)", callback_data="cat_squeeze")
+    )
+    
+    await call.message.edit_text(text, reply_markup=keyboard)
+    
  # ==========================================
 # 6. معالجات الأزرار الأساسية (Secured Callbacks)
 # ==========================================
