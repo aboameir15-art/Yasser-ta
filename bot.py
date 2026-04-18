@@ -2608,13 +2608,6 @@ def calculate_bbw(upper, lower, middle):
     except Exception:
         return 0
   
-def calculate_atr(highs, lows, closes, period=14):
-    if len(closes) < period + 1: return 0.0
-    tr_list = []
-    for i in range(1, len(closes)):
-        tr = max(highs[i] - lows[i], abs(highs[i] - closes[i-1]), abs(lows[i] - closes[i-1]))
-        tr_list.append(tr)
-    return sum(tr_list[-period:]) / period
 
 def calculate_keltner_channels(highs, lows, closes, ema_period=20, atr_period=10, multiplier=2):
     if len(closes) < max(ema_period, atr_period) + 1:
@@ -2622,6 +2615,93 @@ def calculate_keltner_channels(highs, lows, closes, ema_period=20, atr_period=10
     mid = calculate_ema(closes, ema_period)
     atr_v = calculate_atr(highs, lows, closes, atr_period)
     return mid + (multiplier * atr_v), mid, mid - (multiplier * atr_v)
+    
+# ==========================================
+# --- [ دوال الأدوات المحرمة - قلعة أثر ] ---
+# ==========================================
+
+def calculate_atr(highs, lows, closes, period=14):
+    """
+    نسخة قلعة أثر المعتمدة (Wilder's ATR)
+    أدق في حساب الستوب لوز ومنع ضربه بالذيول العشوائية.
+    """
+    if len(closes) < period + 1: return 0.0
+    
+    tr_list = []
+    for i in range(1, len(closes)):
+        # حساب المدى الحقيقي (True Range)
+        tr = max(
+            highs[i] - lows[i],
+            abs(highs[i] - closes[i-1]),
+            abs(lows[i] - closes[i-1])
+        )
+        tr_list.append(tr)
+    
+    # حساب أول قيمة كمتوسط بسيط (SMA) لتبدأ منه
+    atr = sum(tr_list[:period]) / period
+    
+    # تطبيق التنعيم (Smoothing) لبقية القيم - هذا هو "سر" الاستقرار
+    for i in range(period, len(tr_list)):
+        atr = (atr * (period - 1) + tr_list[i]) / period
+        
+    return round(atr, 6)
+
+def calculate_adx(highs, lows, closes, period=14):
+    """
+    قاعدة (المرصاد): حساب مؤشر ADX
+    لمعرفة هل العملة في "انفجار" (ADX > 25) أم "تذبذب" (ADX < 20).
+    """
+    if len(closes) < period * 2: return 0.0
+    
+    plus_dm = []
+    minus_dm = []
+    tr_list = []
+    
+    for i in range(1, len(closes)):
+        up_move = highs[i] - highs[i-1]
+        down_move = lows[i-1] - lows[i]
+        
+        plus_dm.append(max(up_move, 0) if up_move > down_move else 0)
+        minus_dm.append(max(down_move, 0) if down_move > up_move else 0)
+        
+        tr = max(highs[i] - lows[i], abs(highs[i] - closes[i-1]), abs(lows[i] - closes[i-1]))
+        tr_list.append(tr)
+
+    # حساب الـ DI والـ DX (تبسيطاً للمحرك اليدوي)
+    # ملاحظة: هذه نسخة مختصرة لتناسب الأداء السريع في البوت
+    avg_tr = sum(tr_list[-period:]) / period
+    avg_plus_dm = sum(plus_dm[-period:]) / period
+    avg_minus_dm = sum(minus_dm[-period:]) / period
+    
+    plus_di = 100 * (avg_plus_dm / avg_tr) if avg_tr != 0 else 0
+    minus_di = 100 * (avg_minus_dm / avg_tr) if avg_tr != 0 else 0
+    
+    dx = 100 * abs(plus_di - minus_di) / (plus_di + minus_di) if (plus_di + minus_di) != 0 else 0
+    return round(dx, 2)
+
+def calculate_volume_delta(buy_volumes, total_volumes):
+    """
+    قاعدة (فَتَبَيَّنُوا): حساب صافي السيولة (Volume Delta)
+    يميز بين "الزبد" (فوليوم وهمي) و"ما ينفع الناس" (شراء حقيقي).
+    """
+    if not buy_volumes or not total_volumes: return 0.0
+    
+    # صافي السيولة = حجم الشراء - حجم البيع (البيع هو الإجمالي ناقص الشراء)
+    current_buy = float(buy_volumes[-1])
+    current_total = float(total_volumes[-1])
+    current_sell = current_total - current_buy
+    
+    delta = current_buy - current_sell
+    return round(delta, 2)
+
+def get_market_mood(rsi_value):
+    """
+    سيكولوجية (هَلُوعًا ومَنُوعًا): بناءً على مستويات أثر 78/22
+    """
+    if rsi_value >= 78: return "GREED (MANOU'A)"
+    if rsi_value <= 22: return "FEAR (HALOU'A)"
+    if rsi_value >= 50: return "BULLISH_BIAS"
+    return "BEARISH_BIAS"
     
 # ==========================================
 # --- [ دوال التحليل و الجلب ] ---
@@ -2668,6 +2748,7 @@ async def update_crypto_market_data():
                 price = float(coin.get('lastPrice', 0))
                 change_percent = float(coin.get('priceChangePercent', 0))
                 
+                # إعداد السجل الأساسي
                 record = {
                     "symbol": symbol,
                     "name": symbol.replace("USDT", ""),
@@ -2678,7 +2759,9 @@ async def update_crypto_market_data():
                     "volume_24h": float(coin.get('volume', 0)),
                     "change_24h": change_percent,
                     "last_tick_direction": "UP" if change_percent >= 0 else "DOWN",
-                    "updated_at": "now()"    
+                    "updated_at": "now()",
+                    # إضافة توقيت التحديث بالملي ثانية لضمان "المرصاد"
+                    "last_api_update_ms": int(datetime.now().timestamp() * 1000)
                 }
                 
                 tasks = [fetch_klines(session, symbol, tf) for tf in timeframes]
@@ -2686,45 +2769,53 @@ async def update_crypto_market_data():
 
                 for i, tf in enumerate(timeframes):
                     if results[i] and isinstance(results[i], list):
-                        # استخراج البيانات المطلوبة للحسابات
+                        # استخراج البيانات الأساسية + سيولة الحيتان (Index 9)
                         highs = [float(k[2]) for k in results[i]]
                         lows = [float(k[3]) for k in results[i]]
                         closes = [float(k[4]) for k in results[i]]
                         volumes = [float(k[5]) for k in results[i]]
+                        taker_buy_vols = [float(k[9]) for k in results[i]] # استخبارات السيولة الحقيقية
                         
-                        # حساب بولنجر باندز
+                        # الحسابات القديمة (المحافظة عليها كاملة)
                         upper, mid, lower = calculate_bollinger(closes)
                         bbw_value = (upper - lower) / mid if mid > 0 else 0
-                        
-                        # حساب الـ ATR والـ Keltner Channels (الإضافة الجديدة)
                         atr_val = calculate_atr(highs, lows, closes)
                         kc_up, kc_mid, kc_low = calculate_keltner_channels(highs, lows, closes)
-
-                        # حساب الـ OBV
                         obv_val = calculate_obv(closes, volumes)
                         obv_prev_val = calculate_obv(closes[:-1], volumes[:-1]) if len(closes) > 1 else 0.0
 
-                        # تحديث السجل بالبيانات القديمة والجديدة
+                        # الأدوات المحرمة v10.2 (الإضافات الجديدة)
+                        adx_val = calculate_adx(highs, lows, closes) # قوة الانفجار
+                        v_delta = calculate_volume_delta(taker_buy_vols, volumes) # كاشف الزبد
+                        rsi_val = calculate_rsi(closes)
+                        mood = get_market_mood(rsi_val) # سيكولوجية 78/22
+
+                        # تحديث السجل بدمج كل البيانات (القديمة + الجديدة)
                         record.update({
                             f"ema_20_{tf}": calculate_ema(closes, 20),
                             f"ema_50_{tf}": calculate_ema(closes, 50),
                             f"ema_100_{tf}": calculate_ema(closes, 100),
-                            f"rsi_{tf}": calculate_rsi(closes),
+                            f"rsi_{tf}": rsi_val,
                             f"bb_upper_{tf}": upper, 
                             f"bb_middle_{tf}": mid, 
                             f"bb_lower_{tf}": lower,
                             f"bbw_{tf}": bbw_value,
-                            f"atr_{tf}": atr_val,             # إضافة ATR
-                            f"kc_upper_{tf}": kc_up,          # إضافة KC Upper
-                            f"kc_middle_{tf}": kc_mid,        # إضافة KC Middle
-                            f"kc_lower_{tf}": kc_low,         # إضافة KC Lower
+                            f"atr_{tf}": atr_val,
+                            f"adx_{tf}": adx_val,               # جديد: قوة الاتجاه
+                            f"volume_delta_{tf}": v_delta,      # جديد: صافي السيولة
+                            f"kc_upper_{tf}": kc_up,
+                            f"kc_middle_{tf}": kc_mid,
+                            f"kc_lower_{tf}": kc_low,
                             f"volume_{tf}": float(volumes[-1]),
                             f"volume_ma_{tf}": sum(volumes[-20:]) / 20,
                             f"obv_{tf}": obv_val,
                             f"obv_prev_{tf}": obv_prev_val,
-                            f"obv_slope_{tf}": obv_val - obv_prev_val
+                            f"obv_slope_{tf}": obv_val - obv_prev_val,
+                            # تحديثات خاصة بفريم الـ 15 دقيقة (غرفة العمليات)
+                            "market_mood": mood if tf == '15m' else record.get("market_mood", "STABLE"),
+                            "stop_loss_atr": price - (atr_val * 1.5) if tf == '15m' else record.get("stop_loss_atr", 0)
                         })
-
+                
                 final_records.append(record)
             except Exception as e: 
                 logging.error(f"❌ خطأ في معالجة {symbol}: {e}")
@@ -2737,7 +2828,6 @@ async def update_crypto_market_data():
     
     print(f"✅ {datetime.now().strftime('%H:%M:%S')} | تم التحديث والحقن بنجاح.")
     
-
 
 async def unified_trading_system():
     """هذه الدالة هي المايسترو: تحديث البيانات -> انتظار دقيقة -> تحليل الرادار"""
