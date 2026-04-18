@@ -206,20 +206,22 @@ async def trade_reaper():
         await asyncio.sleep(8) # وقت مثالي لضمان تحديث سريع وحماية من الحظر
 
         
+
 async def intelligence_scanner():
     """
-    الرادار v9.5 (قناص الزخم المتفجر + الغطاء الجوي)
-    يدمج وحشية "زحف الإعصار" مع استخبارات "كيلتنر والسيولة" [cite: 1]
+    الرادار v10.2 (القلعة المحصنة)
+    يدمج وحشية "زحف الإعصار" مع استخبارات "الترسانة الجديدة"
     ويطبق فلتر "الغطاء الجوي لفريم الساعة" كشرط أساسي وصارم.
     """
-    print(f"🚀 {datetime.now().strftime('%H:%M:%S')} | الرادار v9.5 يمسح السوق بحثاً عن الثلاثية المتفجرة والغطاء الجوي...")
+    print(f"🚀 {datetime.now().strftime('%H:%M:%S')} | الرادار يمسح السوق بحثاً عن الثلاثية المتفجرة والغطاء الجوي...")
     
     try:
         res = supabase.table("crypto_market_simulation").select("*").execute()
         coins = res.data
     
+        # تم تصحيح الخطأ القاتل هنا (إزالة [cite: 2])
         if not coins: 
-            return [cite: 2]
+            return []
 
         for coin in coins:
             symbol = coin['symbol']
@@ -227,11 +229,18 @@ async def intelligence_scanner():
             reasons = []
 
             # ==========================================
+            # 🛑 [ الإضافة الجديدة: صمام أمان الملك ]
+            # ==========================================
+            kill_switch = coin.get('is_kill_switch_active') or False
+            if kill_switch:
+                continue # "فذروه في سنبله" - السوق ينهار، ننتقل للعملة التالية لحمايتك
+
+            # ==========================================
             # 🛠️ [ 1. استخراج ترسانة البيانات الأساسية ]
             # ==========================================
-            price = float(coin.get('current_price') or 0) [cite: 3]
+            price = float(coin.get('current_price') or 0)
             
-            # --- [ الإضافة الجديدة: بيانات فريم الساعة 1H ] ---
+            # --- [ بيانات فريم الساعة 1H ] ---
             ema20_1h = float(coin.get('ema_20_1h') or 0)
             ema50_1h = float(coin.get('ema_50_1h') or 0)
             ema100_1h = float(coin.get('ema_100_1h') or 0)
@@ -242,157 +251,159 @@ async def intelligence_scanner():
             # 🛡️ [ الفلتر القاتل: فحص الغطاء الجوي - فريم الساعة 1H ]
             # ==========================================
             is_1h_ready = (
-                (price > ema20_1h) and              # السعر فوق ايمي 20 (وسط كيلتنر)
-                (price < bb_upper_1h) and           # السعر تحت البولنجر العلوي (يتحضر للانفجار)
-                (ema20_1h > bb_mid_1h) and          # ايمي 20 فوق متوسط البولنجر
-                (ema20_1h > ema50_1h > ema100_1h)   # المتوسطات مترتبة كقواعد صواريخ
+                (price > ema20_1h) and              
+                (price < bb_upper_1h) and           
+                (ema20_1h > bb_mid_1h) and          
+                (ema20_1h > ema50_1h > ema100_1h)   
             )
 
-            # إذا لم يتحقق شرط الساعة، ننتقل للعملة التالية فوراً ولا نكمل الفحص!
+            # إذا لم يتحقق شرط الساعة، ننتقل للعملة التالية فوراً!
             if not is_1h_ready:
                 continue
                 
-            # إذا اجتازت العملة الفلتر، نمنحها نقاط الغطاء الجوي
             score += 50
-            reasons.append("🛡️ غطاء جوي (1H): ترتيب هجومي مثالي على فريم الساعة (قاعدة انطلاق)")
+            reasons.append("🛡️ غطاء جوي (1H): ترتيب هجومي مثالي على فريم الساعة")
 
             # ==========================================
-            # 🛠️ [ 2. استكمال استخراج بيانات 15m و 5m ]
+            # 🛠️ [ 2. استكمال استخراج بيانات 15m و 5m والترسانة الجديدة ]
             # ==========================================
-            # خطوط البولنجر 15m
-            upper = float(coin.get('bb_upper_15m') or 0) [cite: 3]
-            lower = float(coin.get('bb_lower_15m') or 0) [cite: 3]
-            middle = float(coin.get('bb_middle_15m') or 1) [cite: 4]
+            upper = float(coin.get('bb_upper_15m') or 0) 
+            lower = float(coin.get('bb_lower_15m') or 0) 
+            middle = float(coin.get('bb_middle_15m') or 1) 
             
-            # قنوات كيلتنر 15m
-            kc_upper = float(coin.get('kc_upper_15m') or 0) [cite: 4]
-            kc_lower = float(coin.get('kc_lower_15m') or 0) [cite: 4]
+            kc_upper = float(coin.get('kc_upper_15m') or 0) 
             
-            # المتوسطات والمؤشرات 15m
-            ema20 = float(coin.get('ema_20_15m') or 0) [cite: 5]
-            ema50 = float(coin.get('ema_50_15m') or 0) [cite: 5]
-            ema100 = float(coin.get('ema_100_15m') or 0) [cite: 5]
-            rsi_15m = float(coin.get('rsi_15m') or 50) [cite: 5]
+            ema20 = float(coin.get('ema_20_15m') or 0) 
+            ema50 = float(coin.get('ema_50_15m') or 0) 
+            ema100 = float(coin.get('ema_100_15m') or 0) 
+            rsi_15m = float(coin.get('rsi_15m') or 50) 
             
-            # السيولة
-            vol_15m = float(coin.get('volume_15m') or 0) [cite: 6]
-            vol_ma_15m = float(coin.get('volume_ma_15m') or 1) [cite: 6]
-            obv_slope_15m = float(coin.get('obv_slope_15m') or 0) [cite: 6]
-            oi_change = float(coin.get('open_interest_change_24h') or 0) [cite: 6]
+            vol_15m = float(coin.get('volume_15m') or 0) 
+            vol_ma_15m = float(coin.get('volume_ma_15m') or 1) 
+            obv_slope_15m = float(coin.get('obv_slope_15m') or 0) 
+            oi_change = float(coin.get('open_interest_change_24h') or 0) 
             
-            # توسع القنوات (الشرارة)
-            bbw_15m = float(coin.get('bbw_15m') or 0) [cite: 6]
-            bbw_prev_15m = float(coin.get('bbw_prev_15m') or 0) [cite: 7]
-            expansion_ratio_15m = (bbw_15m / bbw_prev_15m) if bbw_prev_15m > 0 else 1.0 [cite: 7]
+            bbw_15m = float(coin.get('bbw_15m') or 0) 
+            bbw_prev_15m = float(coin.get('bbw_prev_15m') or 0) 
+            expansion_ratio_15m = (bbw_15m / bbw_prev_15m) if bbw_prev_15m > 0 else 1.0 
 
-            bbw_5m = float(coin.get('bbw_5m') or 0) [cite: 7]
-            bbw_prev_5m = float(coin.get('bbw_prev_5m') or 0) [cite: 7]
-            expansion_ratio_5m = (bbw_5m / bbw_prev_5m) if bbw_prev_5m > 0 else 1.0 [cite: 7]
+            bbw_5m = float(coin.get('bbw_5m') or 0) 
+            bbw_prev_5m = float(coin.get('bbw_prev_5m') or 0) 
+            expansion_ratio_5m = (bbw_5m / bbw_prev_5m) if bbw_prev_5m > 0 else 1.0 
+
+            # --- [ استخراج الأدوات المحرمة الجديدة ] ---
+            vol_delta = float(coin.get('volume_delta_15m') or 0)
+            adx_val = float(coin.get('adx_15m') or 0)
+            stop_loss = float(coin.get('stop_loss_atr') or 0)
+            mood = coin.get('market_mood') or 'NEUTRAL'
+            orderbook_ratio = float(coin.get('orderbook_imbalance_ratio') or 0)
+            whale_detected = coin.get('whale_absorption_detected') or False
 
             # ==========================================
             # 🔥 [ 3. المحرك الهجومي: تحليل الثلاثية المتفجرة ]
             # ==========================================
-
-            # الشرط الأول: زحف الإعصار
             is_crawling_up = (
-                (price >= ema20) and  [cite: 8]
-                (price >= upper * 0.995) and [cite: 9]
-                (ema20 > middle) and [cite: 9]
-                (ema20 > ema50 > ema100) and [cite: 9]
-                (expansion_ratio_15m > 1.10) [cite: 9]
+                (price >= ema20) and  
+                (price >= upper * 0.995) and 
+                (ema20 > middle) and 
+                (ema20 > ema50 > ema100) and 
+                (expansion_ratio_15m > 1.10) 
             )
 
-            # الشرط الثاني: شرارة 5 دقائق
-            is_5m_spark = expansion_ratio_5m > 1.20 [cite: 10]
+            is_5m_spark = expansion_ratio_5m > 1.20 
+            is_volume_spike = vol_ma_15m > 0 and vol_15m > (vol_ma_15m * 2) 
 
-            # الشرط الثالث: فوليوم مضاعف
-            is_volume_spike = vol_ma_15m > 0 and vol_15m > (vol_ma_15m * 2) [cite: 10]
-
-            # --- تقييم النقاط ---
             if is_crawling_up:
-                score += 50 [cite: 10]
-                reasons.append(f"🚀 زحف الإعصار: السعر يركب الخط العلوي بقوة هجومية مع توسع ({expansion_ratio_15m:.1%})") [cite: 11]
+                score += 50 
+                reasons.append(f"🚀 زحف الإعصار: السعر يركب الخط العلوي بقوة هجومية مع توسع ({expansion_ratio_15m:.1%})") 
 
             if is_5m_spark:
-                score += 40 [cite: 11]
-                reasons.append(f"🔥 شرارة الانفجار: توسع عنيف جداً في فريم 5m ({expansion_ratio_5m:.1%})") [cite: 11]
+                score += 40 
+                reasons.append(f"🔥 شرارة الانفجار: توسع عنيف جداً في فريم 5m ({expansion_ratio_5m:.1%})") 
 
             if is_volume_spike:
-                score += 40 [cite: 12]
-                reasons.append(f"📊 فوليوم مضاعف: السيولة الحالية تتجاوز 200% من المتوسط") [cite: 12]
+                score += 40 
+                reasons.append(f"📊 فوليوم مضاعف: السيولة الحالية تتجاوز 200% من المتوسط") 
 
             # ==========================================
-            # 🌋 [ 4. دمج استخبارات كيلتنر والعقود (Boosters) ]
+            # 🌋 [ 4. دمج استخبارات كيلتنر، العقود، والأدوات الجديدة (Boosters) ]
             # ==========================================
-            
-            # إذا كسر البولنجر قناة كيلتنر (خروج من انضغاط)
-            if (upper > kc_upper) and expansion_ratio_15m > 1.05: [cite: 13]
-                score += 30 [cite: 13]
-                reasons.append("🌋 كسر الانضغاط (k): السعر تحرر من ضغط كيلتنر بقوة هائلة") [cite: 13]
+            if (upper > kc_upper) and expansion_ratio_15m > 1.05: 
+                score += 30 
+                reasons.append("🌋 كسر الانضغاط (k): السعر تحرر من ضغط كيلتنر بقوة هائلة") 
 
-            # إذا كانت هناك حيتان تدعم الانفجار (العقود الآجلة)
-            if oi_change > 5 and is_crawling_up: [cite: 14]
-                score += 30 [cite: 14]
-                reasons.append(f"🐳 وقود الحيتان: الاهتمام المفتوح يرتفع بالتزامن مع الصعود (+{oi_change}%)") [cite: 14]
+            if oi_change > 5 and is_crawling_up: 
+                score += 30 
+                reasons.append(f"🐳 وقود الحيتان: الاهتمام المفتوح يرتفع بالتزامن مع الصعود (+{oi_change}%)") 
+
+            # --- الإضافة الجديدة: تعزيز النقاط بناءً على الـ ADX (قوة الانفجار) ---
+            if adx_val > 25 and is_crawling_up:
+                score += 20
+                reasons.append(f"🌪️ قوة الاتجاه (ADX): مسار انفجاري مؤكد ({adx_val})")
 
             # ==========================================
             # 🛡️ [ 5. فلاتر الحماية الصارمة (لعنة على التلاعب) ]
             # ==========================================
-            
-            # صعود بدون سيولة، أو صعود والقناة تضيق = فخ حيتان
-            if price > upper and (obv_slope_15m < 0 or expansion_ratio_15m < 0.95): [cite: 15]
-                score -= 100  [cite: 15]
-                reasons.append("⚠️ فخ الحيتان: صعود كاذب للتصريف (خروج سيولة أو القناة تضيق)") [cite: 16]
+            # --- الإضافة الجديدة: فحص "الزبد" (Volume Delta بالسالب) مع OBV ---
+            if price > upper and (obv_slope_15m < 0 or expansion_ratio_15m < 0.95 or vol_delta < 0): 
+                score -= 100  
+                reasons.append("⚠️ فخ الحيتان أو زبد: صعود كاذب وتصريف مخفي للسيولة") 
 
             # ==========================================
             # 🎯 [ 6. قرار الإطلاق النهائي وتحديث الاستخبارات ]
             # ==========================================
-            high_24h = float(coin.get('high_24h') or (price * 1.05)) [cite: 16]
-            low_24h = float(coin.get('low_24h') or (price * 0.95)) [cite: 16]
-            fib_618 = high_24h - (0.618 * (high_24h - low_24h)) [cite: 17]
+            high_24h = float(coin.get('high_24h') or (price * 1.05)) 
+            low_24h = float(coin.get('low_24h') or (price * 0.95)) 
+            fib_618 = high_24h - (0.618 * (high_24h - low_24h)) 
 
-            # تجهيز قيم الأسرار المرصودة كأرقام (1 للمتحقق، 0 لغير المتحقق)
-            sc_crawling = 1 if is_crawling_up else 0 [cite: 17]
-            sc_spark = 1 if is_5m_spark else 0 [cite: 17]
-            sc_volume = 1 if is_volume_spike else 0 [cite: 17]
-            sc_keltner = 1 if (upper > kc_upper and expansion_ratio_15m > 1.05) else 0 [cite: 18]
-            sc_whale = 1 if (oi_change > 5 and is_crawling_up) else 0 [cite: 18]
+            sc_crawling = 1 if is_crawling_up else 0 
+            sc_spark = 1 if is_5m_spark else 0 
+            sc_volume = 1 if is_volume_spike else 0 
+            sc_keltner = 1 if (upper > kc_upper and expansion_ratio_15m > 1.05) else 0 
+            sc_whale = 1 if (oi_change > 5 and is_crawling_up) else 0 
 
-            # إطلاق الإنذار الذهبي إذا توافقت الثلاثية (الزحف + الشرارة + الفوليوم)
-            if is_crawling_up and is_5m_spark and is_volume_spike: [cite: 18]
-                score += 60  # مكافأة "التطابق المثالي" لرفع السكور إلى القمة 190/100 [cite: 18]
-                 
-            if score >= 150:  [cite: 19]
-                supabase.table("market_intelligence").upsert({ [cite: 19]
-                    "symbol": symbol, [cite: 19]
-                    "current_price": price, [cite: 19]
-                    "avg_volume": vol_ma_15m, [cite: 20]
-                    "volume_24h": vol_15m, [cite: 20]
-                    "rsi_value": rsi_15m, [cite: 20]
-                    "pump_score": int(score),  [cite: 20]
-                    "global_obv_status": "MOMENTUM_EXPLOSION", [cite: 20]
-                    "multi_frame_liquidity_score": obv_slope_15m, [cite: 21]
-                    "is_squeezed": False, # لقد تحرر بالفعل من الانضغاط [cite: 21]
-                    "fib_golden_ratio": fib_618, [cite: 21]
-                    "trend_status": "NUCLEAR_EXPLOSION", [cite: 21]
-                    "is_1h_confirmed": True, # ✅ إضافة تأكيد الغطاء الجوي لقاعدة البيانات
-                    # رفع أرقام الأسرار للأعمدة الجديدة [cite: 22]
-                    "score_crawling": sc_crawling, [cite: 22]
-                    "score_spark": sc_spark, [cite: 22]
-                    "score_volume": sc_volume, [cite: 22]
-                    "score_keltner": sc_keltner, [cite: 22]
-                    "score_whale": sc_whale, [cite: 23]
-                    "last_updated": "now()" [cite: 23]
-                }).execute() [cite: 23]
+            if is_crawling_up and is_5m_spark and is_volume_spike: 
+                score += 60  
+             
+            if score >= 150:  
+                supabase.table("market_intelligence").upsert({ 
+                    "symbol": symbol, 
+                    "current_price": price, 
+                    "avg_volume": vol_ma_15m, 
+                    "volume_24h": vol_15m, 
+                    "rsi_value": rsi_15m, 
+                    "pump_score": int(score),  
+                    "global_obv_status": "MOMENTUM_EXPLOSION", 
+                    "multi_frame_liquidity_score": obv_slope_15m, 
+                    "is_squeezed": False, 
+                    "fib_golden_ratio": fib_618, 
+                    "trend_status": "NUCLEAR_EXPLOSION", 
+                    "is_1h_confirmed": True, 
+                    "score_crawling": sc_crawling, 
+                    "score_spark": sc_spark, 
+                    "score_volume": sc_volume, 
+                    "score_keltner": sc_keltner, 
+                    "score_whale": sc_whale,
+                    
+                    # --- تغذية أعمدة الجدول الجديدة بكل دقة ---
+                    "dynamic_sl_atr": stop_loss,
+                    "market_emotion_rsi": mood,
+                    "orderbook_imbalance_ratio": orderbook_ratio,
+                    "whale_support_detected": whale_detected,
+                    "is_kill_switch_active": kill_switch,
+                    "is_fake_pump": True if vol_delta < 0 else False,
+                    
+                    "last_updated": "now()" 
+                }).execute() 
 
-                # إرسال الإشعار الفوري (تأكد من تمرير الأسباب للبوت)
-                await trigger_golden_signal(symbol, score, reasons, fib_618, price) [cite: 23]
+                await trigger_golden_signal(symbol, score, reasons, fib_618, price) 
                 
-    except Exception as e: [cite: 24]
-        import logging [cite: 24]
-        logging.error(f"❌ خطأ داخلي في الرادار القناص v9.5: {e}") [cite: 24]
+    except Exception as e: 
+        import logging 
+        logging.error(f"❌ خطأ داخلي في الرادار القناص v10.2: {e}") 
 
-    print("✅ تم الانتهاء من مسح الزخم المتفجر والغطاء الجوي (v9.5).") [cite: 24]
+    print("✅ تم الانتهاء من مسح الزخم المتفجر والغطاء الجوي (v10.2).")
+    
 
 # تحديث دالة التنبيه لتقبل السعر الحالي
 async def trigger_golden_signal(symbol, score, reasons, fib_618, price):
