@@ -2800,6 +2800,24 @@ async def update_crypto_market_data():
                         v_delta = calculate_volume_delta(taker_buy_vols, volumes) # كاشف الزبد
                         rsi_val = calculate_rsi(closes)
                         mood = get_market_mood(rsi_val) # سيكولوجية 78/22
+                        
+                        # --- [ إضافة أثر: محرك الأهداف والمناطق ] ---
+                        if tf == '15m':
+                            # تحديد منطقة الدخول حول السعر الحالي
+                            record["entry_zone_start"] = round(price * 0.998, 6)
+                            record["entry_zone_end"] = round(price * 1.002, 6)
+                            
+                            # تحديد درع الحماية DCA (تعديل المتوسط)
+                            record["dca_protection_price"] = round(price - (atr_val * 1.5), 6)
+                            
+                            # تحديد أهداف جني الأرباح الآلية
+                            record["target_1"] = round(price + (atr_val * 1.2), 6)
+                            record["target_2"] = round(price + (atr_val * 2.5), 6)
+                            
+                            # تحديد وقف الخسارة وسيكولوجية السوق
+                            record["stop_loss_atr"] = round(price - (atr_val * 2.2), 6)
+                            record["market_mood"] = get_market_mood(rsi_val)
+                        # --- [ نهاية الإضافة ] ---
 
                         # تحديث السجل بدمج كل البيانات (القديمة + الجديدة)
                         record.update({
@@ -2826,7 +2844,8 @@ async def update_crypto_market_data():
                             "market_mood": mood if tf == '15m' else record.get("market_mood", "STABLE"),
                             "stop_loss_atr": price - (atr_val * 1.5) if tf == '15m' else record.get("stop_loss_atr", 0)
                         })
-                
+
+
                 final_records.append(record)
             except Exception as e: 
                 logging.error(f"❌ خطأ في معالجة {symbol}: {e}")
